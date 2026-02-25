@@ -1,0 +1,24 @@
+apiVersion: skaffold/v2alpha3
+kind: Config
+deploy:
+  kubectl:
+    manifests:
+      - ./infra/k8s/*
+build:
+  local:
+    push: true
+    # concurrency: 1
+    # tryImportMissing: false
+    # useDockerCLI: false
+  artifacts:
+    - image: abbadanmusa/smart-proctor-auth
+      context: auth
+      docker:
+        dockerfile: Dockerfile
+        # noCache: false
+        # pullParent: false
+        # squash: false
+      sync:
+        manual:
+          - src: 'src/**/*.ts'
+            dest: .
