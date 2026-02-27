@@ -3,22 +3,23 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.User = void 0;
 const mongoose_1 = require("mongoose");
 const password_1 = require("../services/password");
-const availabilitySlotSchema = new mongoose_1.Schema({
-    day: { type: String, required: true, trim: true },
-    from: { type: String, required: true, trim: true },
-    to: { type: String, required: true, trim: true },
-}, { _id: false });
 const userSchema = new mongoose_1.Schema({
-    firstName: {
+    fullName: {
         type: String,
         required: true,
         minlength: 3,
         trim: true,
     },
+    firstName: {
+        type: String,
+        required: true,
+        minlength: 2,
+        trim: true,
+    },
     lastName: {
         type: String,
         required: true,
-        minlength: 3,
+        minlength: 2,
         trim: true,
     },
     email: {
@@ -32,81 +33,39 @@ const userSchema = new mongoose_1.Schema({
     },
     role: {
         type: String,
-        enum: ['doctor', 'nurse', 'student', 'lecturer', 'admin', undefined],
+        enum: ['student', 'lecturer', 'admin'],
+        required: true,
     },
-    organization: {
+    studentId: {
         type: String,
         trim: true,
     },
-    termsAccepted: {
-        type: Boolean,
-        default: false,
+    staffId: {
+        type: String,
+        trim: true,
+    },
+    institution: {
+        type: String,
+        trim: true,
+    },
+    department: {
+        type: String,
+        trim: true,
+    },
+    level: {
+        type: String,
+        trim: true,
     },
     aiConsent: {
         type: Boolean,
         default: false,
     },
+    staffDocumentName: {
+        type: String,
+        trim: true,
+    },
     faceCapture: {
         type: String,
-    },
-    phone: {
-        type: String,
-        trim: true,
-    },
-    country: {
-        type: String,
-        trim: true,
-    },
-    city: {
-        type: String,
-        trim: true,
-    },
-    specialization: {
-        type: [String],
-        default: [],
-    },
-    yearsOfExperience: {
-        type: Number,
-        min: 0,
-    },
-    licenseNumber: {
-        type: String,
-        trim: true,
-    },
-    licenseCountry: {
-        type: String,
-        trim: true,
-    },
-    licenseFileUrl: {
-        type: String,
-        trim: true,
-    },
-    profileImageUrl: {
-        type: String,
-        trim: true,
-    },
-    locale: {
-        type: String,
-    },
-    bio: {
-        type: String,
-        trim: true,
-    },
-    languages: {
-        type: [String],
-        default: [],
-    },
-    documents: {
-        type: [String],
-        default: [],
-    },
-    availability: {
-        type: [availabilitySlotSchema],
-        default: [{ day: 'mon', from: '09:00', to: '17:00' }],
-    },
-    approved: {
-        type: Boolean,
-        default: false,
     },
 }, {
     toJSON: {

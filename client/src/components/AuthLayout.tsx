@@ -9,7 +9,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       alignItems="center"
       justifyContent="center"
     >
-      <Container maxW="md">{children}</Container>
+      <Container maxW="lg">{children}</Container>
     </Box>
   );
 }

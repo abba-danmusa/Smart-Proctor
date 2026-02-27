@@ -24,6 +24,13 @@ spec:
                 name: query-srv
                 port:
                   number: 3001
+          - path: /?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: client-srv
+                port:
+                  number: 80
     - host: 494a9d6e096e.ngrok-free.app
       http:
         paths:
@@ -41,3 +48,10 @@ spec:
                 name: query-srv
                 port:
                   number: 3001
+          - path: /?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: client-srv
+                port:
+                  number: 80

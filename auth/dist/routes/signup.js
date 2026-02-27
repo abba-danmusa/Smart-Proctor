@@ -13,103 +13,154 @@ const user_created_publisher_1 = require("../events/publishers/user-created-publ
 const nats_wrapper_1 = require("../nats-wrapper");
 const router = express_1.default.Router();
 exports.signupRouter = router;
+const parseName = (raw) => {
+    if (typeof raw !== 'string' || !raw.trim()) {
+        throw new Error('Full name is required');
+    }
+    const normalized = raw.trim().replace(/\s+/g, ' ');
+    if (normalized.length < 3) {
+        throw new Error('Name must be at least 3 characters long');
+    }
+    const [firstName, ...rest] = normalized.split(' ');
+    const lastName = rest.join(' ').trim();
+    if (!firstName || !lastName) {
+        throw new Error('Name must include both first and last name');
+    }
+    return {
+        fullName: normalized,
+        firstName,
+        lastName,
+    };
+};
 router.post('/api/users/signup', [
     (0, express_validator_1.body)().custom((value) => {
-        const candidateName = value?.fullName ?? value?.name;
-        if (typeof candidateName !== 'string' || !candidateName.trim()) {
-            throw new Error('Full name is required');
-        }
-        if (candidateName.trim().length < 3) {
-            throw new Error('Name must be at least 3 characters long');
-        }
-        if (candidateName.trim().split(/\s+/).length < 2) {
-            throw new Error('Name must include both first and last name');
-        }
+        parseName(value?.fullName ?? value?.name);
         return true;
     }),
-    (0, express_validator_1.body)('organization')
-        .optional()
-        .trim()
-        .isLength({ min: 2 })
-        .withMessage('Organization must be at least 2 characters long'),
-    (0, express_validator_1.body)('email')
-        .isEmail()
-        .withMessage('Please provide a valid email'),
+    (0, express_validator_1.body)('email').isEmail().withMessage('Please provide a valid email'),
     (0, express_validator_1.body)('password')
         .trim()
         .isLength({ min: 8, max: 20 })
         .withMessage('Password must be between 8 and 20 characters long'),
+    (0, express_validator_1.body)('confirmPassword')
+        .optional()
+        .isString()
+        .withMessage('confirmPassword must be a string'),
+    (0, express_validator_1.body)().custom((value) => {
+        if (typeof value?.confirmPassword === 'string' &&
+            value.confirmPassword !== value.password) {
+            throw new Error('Password and confirmPassword must match');
+        }
+        return true;
+    }),
     (0, express_validator_1.body)('role')
-        .optional()
-        .isIn(['doctor', 'nurse', 'student', 'lecturer', 'admin'])
+        .isIn(['student', 'lecturer', 'admin'])
         .withMessage('Invalid role'),
-    (0, express_validator_1.body)('termsAccepted')
+    (0, express_validator_1.body)('studentId')
         .optional()
-        .isBoolean()
-        .withMessage('termsAccepted must be a boolean'),
+        .trim()
+        .isLength({ min: 2 })
+        .withMessage('studentId must be at least 2 characters long'),
+    (0, express_validator_1.body)('staffId')
+        .optional()
+        .trim()
+        .isLength({ min: 2 })
+        .withMessage('staffId must be at least 2 characters long'),
+    (0, express_validator_1.body)('institution')
+        .optional()
+        .trim()
+        .isLength({ min: 2 })
+        .withMessage('institution must be at least 2 characters long'),
+    (0, express_validator_1.body)('department')
+        .optional()
+        .trim()
+        .isLength({ min: 2 })
+        .withMessage('department must be at least 2 characters long'),
+    (0, express_validator_1.body)('level')
+        .optional()
+        .trim()
+        .isLength({ min: 1 })
+        .withMessage('level must not be empty'),
     (0, express_validator_1.body)('aiConsent')
         .optional()
         .isBoolean()
         .withMessage('aiConsent must be a boolean'),
-    (0, express_validator_1.body)('faceCapture')
+    (0, express_validator_1.body)('staffDocumentName')
         .optional()
+        .isString()
+        .withMessage('staffDocumentName must be a string'),
+    (0, express_validator_1.body)('faceCapture')
         .isString()
         .isLength({ min: 16 })
         .withMessage('faceCapture must be a valid image data string'),
+    (0, express_validator_1.body)().custom((value) => {
+        const role = value?.role;
+        const studentId = typeof value?.studentId === 'string' ? value.studentId.trim() : '';
+        const staffId = typeof value?.staffId === 'string' ? value.staffId.trim() : '';
+        const institution = typeof value?.institution === 'string' ? value.institution.trim() : '';
+        const department = typeof value?.department === 'string' ? value.department.trim() : '';
+        const level = typeof value?.level === 'string' ? value.level.trim() : '';
+        const aiConsent = value?.aiConsent;
+        if (role === 'student') {
+            if (!studentId || !institution || !department || !level) {
+                throw new Error('Student signup requires studentId, institution, department, and level');
+            }
+            if (aiConsent !== true) {
+                throw new Error('Student signup requires aiConsent to be true');
+            }
+        }
+        if (role === 'lecturer') {
+            if (!staffId || !institution || !department) {
+                throw new Error('Lecturer signup requires staffId, institution, and department');
+            }
+        }
+        return true;
+    }),
 ], medlink_common_1.validateRequest, async (req, res) => {
-    const { fullName, name, organization, email, password, role, termsAccepted, aiConsent, faceCapture, ...otherDetails } = req.body;
-    const candidateName = (fullName ?? name);
-    const [firstName, ...rest] = candidateName.trim().split(/\s+/);
-    const lastName = rest.join(' ');
-    if (!firstName || !lastName) {
-        throw new medlink_common_1.BadRequestError('Name must include both first and last name');
-    }
+    const { fullName, name, email, password, role, studentId, staffId, institution, department, level, aiConsent, staffDocumentName, faceCapture, } = req.body;
+    const parsedName = parseName(fullName ?? name);
     const existingUser = await User_1.User.findOne({ email });
     if (existingUser) {
         throw new medlink_common_1.BadRequestError('Email in use');
     }
-    const user = new User_1.User({
-        firstName,
-        lastName,
-        organization,
+    const normalizedRole = role;
+    const user = User_1.User.build({
+        fullName: parsedName.fullName,
+        firstName: parsedName.firstName,
+        lastName: parsedName.lastName,
         email,
         password,
-        role,
-        termsAccepted,
-        aiConsent,
+        role: normalizedRole,
+        studentId: normalizedRole === 'student' ? studentId?.trim() : undefined,
+        staffId: normalizedRole === 'lecturer' ? staffId?.trim() : undefined,
+        institution: ['student', 'lecturer'].includes(normalizedRole)
+            ? institution?.trim()
+            : undefined,
+        department: ['student', 'lecturer'].includes(normalizedRole)
+            ? department?.trim()
+            : undefined,
+        level: normalizedRole === 'student' ? level?.trim() : undefined,
+        aiConsent: normalizedRole === 'student' ? aiConsent === true : false,
+        staffDocumentName: normalizedRole === 'lecturer' && typeof staffDocumentName === 'string' && staffDocumentName.trim().length > 0
+            ? staffDocumentName.trim()
+            : undefined,
         faceCapture,
-        ...otherDetails
     });
     await user.save();
-    const eventRole = user.role === 'doctor' || user.role === 'nurse' ? user.role : undefined;
     await new user_created_publisher_1.UserCreatedPublisher(nats_wrapper_1.natsWrapper.client).publish({
         id: user.id,
         firstName: user.firstName,
         lastName: user.lastName,
         email: user.email,
-        role: eventRole,
-        phone: user.phone,
-        country: user.country,
-        city: user.city,
-        specialization: user.specialization,
-        yearsOfExperience: user.yearsOfExperience,
-        licenseNumber: user.licenseNumber,
-        licenseCountry: user.licenseCountry,
-        licenseFileUrl: user.licenseFileUrl,
-        profileImageUrl: user.profileImageUrl,
-        locale: user.locale,
-        bio: user.bio,
-        languages: user.languages,
-        documents: user.documents,
-        availability: user.availability?.map(({ day, from, to }) => ({ day, from, to })),
-        approved: user.approved,
+        role: user.role,
+        organization: user.institution,
     });
     const userJwt = jsonwebtoken_1.default.sign({
         id: user.id,
-        email: user.email
+        email: user.email,
     }, process.env.JWT_SECRET);
     req.session = {
-        jwt: userJwt
+        jwt: userJwt,
     };
     res.status(201).send({ user, token: userJwt });
 });

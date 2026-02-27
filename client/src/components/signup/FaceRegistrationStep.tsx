@@ -1,32 +1,84 @@
 import { Box, Button, HStack, Text, VStack } from "@chakra-ui/react";
 import { useEffect, useRef, useState } from "react";
 
-interface FaceDetectorLike {
-  detect(input: ImageBitmapSource): Promise<Array<unknown>>;
-}
-
-type FaceDetectorCtor = new (options?: {
-  fastMode?: boolean;
-  maxDetectedFaces?: number;
-}) => FaceDetectorLike;
-
 interface FaceRegistrationStepProps {
   capture: string | null;
   onCapture: (dataUrl: string) => void;
 }
 
-function supportsFaceDetector() {
-  return Boolean((window as Window & { FaceDetector?: FaceDetectorCtor }).FaceDetector);
+interface FaceApiLike {
+  nets: {
+    tinyFaceDetector: {
+      loadFromUri: (uri: string) => Promise<void>;
+    };
+  };
+  TinyFaceDetectorOptions: new (options: { inputSize: number; scoreThreshold: number }) => unknown;
+  detectAllFaces: (input: HTMLCanvasElement, options: unknown) => Promise<Array<unknown>>;
+}
+
+const FACE_MODEL_URI = "https://justadudewhohacks.github.io/face-api.js/models";
+const FACE_API_SCRIPT_SRC = "https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js";
+let tinyDetectorModelPromise: Promise<void> | null = null;
+let faceApiScriptPromise: Promise<FaceApiLike> | null = null;
+
+function getFaceApiGlobal() {
+  return (window as Window & { faceapi?: FaceApiLike }).faceapi ?? null;
+}
+
+async function loadFaceApi() {
+  const existing = getFaceApiGlobal();
+  if (existing) {
+    return existing;
+  }
+
+  if (!faceApiScriptPromise) {
+    faceApiScriptPromise = new Promise<FaceApiLike>((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = FACE_API_SCRIPT_SRC;
+      script.async = true;
+      script.setAttribute("data-face-api-script", "true");
+      script.onload = () => {
+        const faceapi = getFaceApiGlobal();
+        if (!faceapi) {
+          reject(new Error("face-api.js script loaded but global API is unavailable."));
+          return;
+        }
+        resolve(faceapi);
+      };
+      script.onerror = () => {
+        faceApiScriptPromise = null;
+        reject(new Error("Failed to load face-api.js script."));
+      };
+      document.head.appendChild(script);
+    });
+  }
+
+  return faceApiScriptPromise;
+}
+
+async function ensureTinyFaceModelLoaded() {
+  const faceapi = await loadFaceApi();
+
+  if (!tinyDetectorModelPromise) {
+    tinyDetectorModelPromise = faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URI);
+  }
+
+  try {
+    await tinyDetectorModelPromise;
+  } catch (error) {
+    tinyDetectorModelPromise = null;
+    throw error;
+  }
 }
 
 async function detectSingleFace(canvas: HTMLCanvasElement): Promise<boolean> {
-  const detectorCtor = (window as Window & { FaceDetector?: FaceDetectorCtor }).FaceDetector;
-  if (!detectorCtor) {
-    return true;
-  }
+  const faceapi = await loadFaceApi();
+  const options = new faceapi.TinyFaceDetectorOptions({
+    inputSize: 320,
+    scoreThreshold: 0.5,
+  });
 
-  const detector = new detectorCtor({ fastMode: true, maxDetectedFaces: 2 });
-  const faces = await detector.detect(canvas);
+  const faces = await faceapi.detectAllFaces(canvas, options);
   return faces.length === 1;
 }
 
@@ -36,11 +88,12 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
 
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
+  const [isModelLoading, setIsModelLoading] = useState(false);
+  const [isModelReady, setIsModelReady] = useState(false);
   const [message, setMessage] = useState<string>(
-    "Capture a clear front-facing selfie. The AI face model checks that exactly one face is visible.",
+    "Loading face verification model. This checks that exactly one face is visible in the capture.",
   );
   const [messageTone, setMessageTone] = useState<"info" | "success" | "error">("info");
-  const [isDetectorSupported] = useState(supportsFaceDetector);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -48,13 +101,45 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
     setIsCameraActive(false);
   };
 
+  const loadFaceModel = async () => {
+    if (isModelReady) return true;
+
+    setIsModelLoading(true);
+    try {
+      await ensureTinyFaceModelLoaded();
+      setIsModelReady(true);
+      setMessage("Face model ready. Start camera, center your face, then verify.");
+      setMessageTone("info");
+      return true;
+    } catch {
+      setMessage(
+        "Unable to load face verification model. Check internet access or host model files locally and retry.",
+      );
+      setMessageTone("error");
+      return false;
+    } finally {
+      setIsModelLoading(false);
+    }
+  };
+
   useEffect(() => {
+    void loadFaceModel();
+
     return () => {
       stopCamera();
     };
   }, []);
 
   const handleStartCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMessage("Camera API unavailable in this browser.");
+      setMessageTone("error");
+      return;
+    }
+
+    const isReady = await loadFaceModel();
+    if (!isReady) return;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
@@ -63,7 +148,7 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
 
       streamRef.current = stream;
       setIsCameraActive(true);
-      setMessage("Camera ready. Center your face and capture.");
+      setMessage("Camera ready. Center your face and click Verify Face.");
       setMessageTone("info");
 
       if (videoRef.current) {
@@ -78,10 +163,16 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
 
   const handleCapture = async () => {
     if (!videoRef.current) return;
+    const isReady = isModelReady ? true : await loadFaceModel();
+    if (!isReady) return;
 
     setIsChecking(true);
     try {
       const video = videoRef.current;
+      if (!video.videoWidth || !video.videoHeight) {
+        throw new Error("Camera frame unavailable. Wait a moment and try again.");
+      }
+
       const canvas = document.createElement("canvas");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -102,15 +193,8 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
 
       const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
       onCapture(dataUrl);
-      if (isDetectorSupported) {
-        setMessage("Face registration complete. Identity snapshot verified.");
-        setMessageTone("success");
-      } else {
-        setMessage(
-          "Face registration complete. Your browser does not support automatic face detection, so manual capture was used.",
-        );
-        setMessageTone("info");
-      }
+      setMessage("Face registration complete. Identity snapshot verified.");
+      setMessageTone("success");
       stopCamera();
     } catch (error) {
       const details = error instanceof Error ? error.message : "Unable to register facial identity.";
@@ -124,22 +208,18 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
   return (
     <VStack align="stretch" gap={4}>
       <Text fontSize="sm" color="gray.600">
-        Facial identity registration is required for AI proctoring verification.
+        Facial identity registration is required for AI proctoring verification. Face capture is
+        accepted only when exactly one face is detected.
       </Text>
-      {!isDetectorSupported && (
-        <Text fontSize="sm" color="orange.600">
-          Automatic face detection is unavailable in this browser. You can still continue with a
-          manual identity snapshot.
+      {!isModelReady && (
+        <Text fontSize="sm" color={messageTone === "error" ? "red.600" : "orange.600"}>
+          {isModelLoading
+            ? "Preparing face verification model..."
+            : "Face model not ready. Camera start is blocked until model loading succeeds."}
         </Text>
       )}
 
-      <Box
-        border="1px solid"
-        borderColor="blue.100"
-        bg="rgba(248, 250, 252, 0.9)"
-        rounded="xl"
-        p={3}
-      >
+      <Box border="1px solid" borderColor="blue.100" bg="rgba(248, 250, 252, 0.9)" rounded="xl" p={3}>
         <video
           ref={videoRef}
           style={{
@@ -153,19 +233,12 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
         />
 
         {!isCameraActive && !capture && (
-          <Box
-            rounded="lg"
-            p={6}
-            textAlign="center"
-            bg="gray.100"
-            color="gray.600"
-            fontSize="sm"
-          >
+          <Box rounded="lg" p={6} textAlign="center" bg="gray.100" color="gray.600" fontSize="sm">
             Camera is off. Start camera to capture identity.
           </Box>
         )}
 
-        {capture && (
+        {!isCameraActive && capture && (
           <Box>
             <img
               src={capture}
@@ -178,8 +251,8 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
 
       <HStack flexWrap="wrap" gap={3}>
         {!isCameraActive && (
-          <Button onClick={handleStartCamera} variant="outline" colorPalette="blue">
-            Start Camera
+          <Button onClick={handleStartCamera} variant="outline" colorPalette="blue" loading={isModelLoading}>
+            {capture ? "Retake Capture" : "Start Camera"}
           </Button>
         )}
         {isCameraActive && (

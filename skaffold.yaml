@@ -22,3 +22,7 @@ build:
         manual:
           - src: 'src/**/*.ts'
             dest: .
+    - image: abbadanmusa/smart-proctor-client
+      context: client
+      docker:
+        dockerfile: Dockerfile
