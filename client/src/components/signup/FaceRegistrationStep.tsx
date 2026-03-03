@@ -16,6 +16,15 @@ interface FaceApiLike {
   detectAllFaces: (input: HTMLCanvasElement, options: unknown) => Promise<Array<unknown>>;
 }
 
+type CameraErrorName =
+  | "NotAllowedError"
+  | "SecurityError"
+  | "NotFoundError"
+  | "NotReadableError"
+  | "OverconstrainedError"
+  | "AbortError"
+  | "TypeError";
+
 const FACE_MODEL_URI = "https://justadudewhohacks.github.io/face-api.js/models";
 const FACE_API_SCRIPT_SRC = "https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js";
 let tinyDetectorModelPromise: Promise<void> | null = null;
@@ -82,6 +91,48 @@ async function detectSingleFace(canvas: HTMLCanvasElement): Promise<boolean> {
   return faces.length === 1;
 }
 
+function getCameraErrorMessage(error: unknown) {
+  const name = typeof error === "object" && error && "name" in error ? String(error.name) as CameraErrorName : "";
+
+  if (!window.isSecureContext) {
+    return "Camera access requires a secure origin (HTTPS) or localhost. Open the app on HTTPS or localhost and try again.";
+  }
+
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Camera access was blocked. Allow webcam permission in your browser site settings, then click Start Camera again.";
+  }
+
+  if (name === "NotFoundError") {
+    return "No camera device was found. Connect a webcam and retry.";
+  }
+
+  if (name === "NotReadableError" || name === "AbortError") {
+    return "Camera is busy or unavailable. Close other apps/tabs using the webcam and retry.";
+  }
+
+  if (name === "OverconstrainedError" || name === "TypeError") {
+    return "Unable to start camera with current settings. Retry or switch to another camera device.";
+  }
+
+  return "Unable to access camera. Check webcam permissions and retry.";
+}
+
+async function requestCameraStream() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+  } catch (error) {
+    const name = typeof error === "object" && error && "name" in error ? String(error.name) : "";
+    if (name === "OverconstrainedError") {
+      return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
+
+    throw error;
+  }
+}
+
 export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistrationStepProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -137,14 +188,34 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
       return;
     }
 
+    if (!window.isSecureContext) {
+      setMessage("Camera access requires HTTPS or localhost. Open the app on a secure origin and retry.");
+      setMessageTone("error");
+      return;
+    }
+
     const isReady = await loadFaceModel();
     if (!isReady) return;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      });
+      stopCamera();
+
+      if (navigator.permissions?.query) {
+        try {
+          const cameraPermission = await navigator.permissions.query({ name: "camera" as PermissionName });
+          if (cameraPermission.state === "denied") {
+            setMessage(
+              "Camera permission is currently blocked for this site. Enable it in browser site settings and click Start Camera again.",
+            );
+            setMessageTone("error");
+            return;
+          }
+        } catch {
+          // Ignore permission API failures and proceed with getUserMedia.
+        }
+      }
+
+      const stream = await requestCameraStream();
 
       streamRef.current = stream;
       setIsCameraActive(true);
@@ -155,8 +226,8 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-    } catch {
-      setMessage("Camera access denied. Please allow webcam access and retry.");
+    } catch (error) {
+      setMessage(getCameraErrorMessage(error));
       setMessageTone("error");
     }
   };
