@@ -12,11 +12,37 @@ import { signoutRouter } from './routes/signout'
 import { signupRouter } from './routes/signup'
 
 const app = express()
+const defaultAllowedOrigins = [
+  'http://localhost:5173',
+  'https://smartproctor.dev',
+  'https://www.smartproctor.dev',
+  'https://494a9d6e096e.ngrok-free.app',
+]
+
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? defaultAllowedOrigins.join(','))
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
 
 app.set('trust proxy', true)
 
 app.use(json())
-app.use(cors())
+app.use(
+  cors({
+    origin(
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void
+    ) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true)
+        return
+      }
+
+      callback(null, false)
+    },
+    credentials: true,
+  })
+)
 
 app.use(
   cookieSession({

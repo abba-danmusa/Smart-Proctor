@@ -23,6 +23,74 @@ type SignupFormData = {
 };
 
 type StatusTone = "success" | "warning" | "error";
+type SignupRequestPayload = {
+  fullName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  role: SignupRole;
+  faceCapture: string;
+  aiConsent: boolean;
+  studentId?: string;
+  staffId?: string;
+  institution?: string;
+  department?: string;
+  level?: string;
+  staffDocumentName?: string;
+};
+
+const SIGNUP_ENDPOINT = (() => {
+  const baseUrl = (import.meta.env.VITE_AUTH_API_BASE_URL ?? "").trim();
+  if (!baseUrl) {
+    return "/api/users/signup";
+  }
+
+  return `${baseUrl.replace(/\/+$/, "")}/api/users/signup`;
+})();
+
+const normalizeWhitespace = (value: string) => value.trim().replace(/\s+/g, " ");
+const hasMinLength = (value: string, minLength: number) => normalizeWhitespace(value).length >= minLength;
+
+const hasValidFullName = (value: string) => {
+  const normalized = normalizeWhitespace(value);
+  if (normalized.length < 3) return false;
+
+  const [firstName, ...rest] = normalized.split(" ");
+  const lastName = rest.join(" ").trim();
+
+  return firstName.length >= 2 && lastName.length >= 2;
+};
+
+const buildSignupPayload = (form: SignupFormData, faceCapture: string): SignupRequestPayload => {
+  const payload: SignupRequestPayload = {
+    fullName: normalizeWhitespace(form.fullName),
+    email: form.email.trim().toLowerCase(),
+    password: form.password,
+    confirmPassword: form.confirmPassword,
+    role: form.role,
+    faceCapture,
+    aiConsent: form.role === "student" ? form.aiConsent : false,
+  };
+
+  if (form.role === "student") {
+    payload.studentId = normalizeWhitespace(form.studentId);
+    payload.institution = normalizeWhitespace(form.institution);
+    payload.department = normalizeWhitespace(form.department);
+    payload.level = normalizeWhitespace(form.level);
+  }
+
+  if (form.role === "lecturer") {
+    payload.staffId = normalizeWhitespace(form.staffId);
+    payload.institution = normalizeWhitespace(form.institution);
+    payload.department = normalizeWhitespace(form.department);
+    const normalizedDocumentName = normalizeWhitespace(form.staffDocumentName);
+    if (normalizedDocumentName) {
+      payload.staffDocumentName = normalizedDocumentName;
+    }
+  }
+
+  return payload;
+};
 
 const STEP_DETAILS = [
   { title: "Account", description: "Choose role and identity" },
@@ -153,6 +221,7 @@ export default function SignupPage() {
   };
 
   const emailLooksValid = useMemo(() => /\S+@\S+\.\S+/.test(form.email.trim()), [form.email]);
+  const fullNameLooksValid = useMemo(() => hasValidFullName(form.fullName), [form.fullName]);
   const passwordsMatch = useMemo(
     () => form.password.length > 0 && form.password === form.confirmPassword,
     [form.password, form.confirmPassword],
@@ -161,28 +230,28 @@ export default function SignupPage() {
   const roleFieldsComplete = useMemo(() => {
     if (form.role === "student") {
       return Boolean(
-        form.studentId.trim() &&
-          form.institution.trim() &&
-          form.department.trim() &&
-          form.level.trim() &&
+        hasMinLength(form.studentId, 2) &&
+          hasMinLength(form.institution, 2) &&
+          hasMinLength(form.department, 2) &&
+          hasMinLength(form.level, 1) &&
           form.aiConsent,
       );
     }
 
     if (form.role === "lecturer") {
-      return Boolean(form.staffId.trim() && form.institution.trim() && form.department.trim());
+      return Boolean(hasMinLength(form.staffId, 2) && hasMinLength(form.institution, 2) && hasMinLength(form.department, 2));
     }
 
     return true;
   }, [form]);
 
   const accountStepComplete = useMemo(
-    () => Boolean(form.fullName.trim() && emailLooksValid),
-    [form.fullName, emailLooksValid],
+    () => Boolean(fullNameLooksValid && emailLooksValid),
+    [fullNameLooksValid, emailLooksValid],
   );
 
   const securityStepComplete = useMemo(
-    () => Boolean(form.password.length >= 8 && passwordsMatch),
+    () => Boolean(form.password.length >= 8 && form.password.length <= 20 && passwordsMatch),
     [form.password.length, passwordsMatch],
   );
   const faceStepComplete = useMemo(() => Boolean(form.faceCapture), [form.faceCapture]);
@@ -201,7 +270,7 @@ export default function SignupPage() {
     if (currentStep === 0) {
       return accountStepComplete
         ? "Step complete. Continue to role-specific details."
-        : "Provide your full name and a valid email address.";
+        : "Provide first and last name (2+ characters each) and a valid email address.";
     }
     if (currentStep === 1) {
       return roleFieldsComplete
@@ -211,7 +280,7 @@ export default function SignupPage() {
     if (currentStep === 2) {
       return securityStepComplete
         ? "Security step complete. Continue to facial verification."
-        : "Password must be at least 8 characters and both password fields must match.";
+        : "Password must be 8 to 20 characters and both password fields must match.";
     }
     return faceStepComplete
       ? "Face registration complete. Form is ready to submit."
@@ -236,34 +305,10 @@ export default function SignupPage() {
     setStatusMessage(null);
     setStatusTone(null);
 
-    const payload: Record<string, unknown> = {
-      fullName: form.fullName.trim(),
-      email: form.email.trim().toLowerCase(),
-      password: form.password,
-      confirmPassword: form.confirmPassword,
-      role: form.role,
-      faceCapture,
-    };
-
-    if (form.role === "student") {
-      payload.studentId = form.studentId.trim();
-      payload.institution = form.institution.trim();
-      payload.department = form.department.trim();
-      payload.level = form.level.trim();
-      payload.aiConsent = form.aiConsent;
-    }
-
-    if (form.role === "lecturer") {
-      payload.staffId = form.staffId.trim();
-      payload.institution = form.institution.trim();
-      payload.department = form.department.trim();
-      if (form.staffDocumentName.trim()) {
-        payload.staffDocumentName = form.staffDocumentName.trim();
-      }
-    }
+    const payload = buildSignupPayload(form, faceCapture);
 
     try {
-      const response = await fetch("/api/users/signup", {
+      const response = await fetch(SIGNUP_ENDPOINT, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

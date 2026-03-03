@@ -16,9 +16,28 @@ const signout_1 = require("./routes/signout");
 const signup_1 = require("./routes/signup");
 const app = (0, express_1.default)();
 exports.app = app;
+const defaultAllowedOrigins = [
+    'http://localhost:5173',
+    'https://smartproctor.dev',
+    'https://www.smartproctor.dev',
+    'https://494a9d6e096e.ngrok-free.app',
+];
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? defaultAllowedOrigins.join(','))
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 app.set('trust proxy', true);
 app.use((0, body_parser_1.json)());
-app.use((0, cors_1.default)());
+app.use((0, cors_1.default)({
+    origin(origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(null, false);
+    },
+    credentials: true,
+}));
 app.use((0, cookie_session_1.default)({
     signed: false,
     secure: process.env.NODE_ENV !== 'test'
