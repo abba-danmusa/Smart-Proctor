@@ -322,17 +322,17 @@ export default function FaceRegistrationStep({ capture, onCapture }: FaceRegistr
 
       <HStack flexWrap="wrap" gap={3}>
         {!isCameraActive && (
-          <Button onClick={handleStartCamera} variant="outline" colorPalette="blue" loading={isModelLoading}>
+          <Button type="button" onClick={handleStartCamera} variant="outline" colorPalette="blue" loading={isModelLoading}>
             {capture ? "Retake Capture" : "Start Camera"}
           </Button>
         )}
         {isCameraActive && (
-          <Button onClick={handleCapture} loading={isChecking} colorPalette="blue">
+          <Button type="button" onClick={handleCapture} loading={isChecking} colorPalette="blue">
             Verify Face
           </Button>
         )}
         {isCameraActive && (
-          <Button onClick={stopCamera} variant="ghost">
+          <Button type="button" onClick={stopCamera} variant="ghost">
             Stop Camera
           </Button>
         )}
