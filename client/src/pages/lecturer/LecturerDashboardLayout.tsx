@@ -13,10 +13,11 @@ const SIGNOUT_ENDPOINT = (() => {
 
 const lecturerNavItems: Array<{ label: string; to: string; end?: boolean }> = [
   { label: "Dashboard", to: "/dashboard/lecturer", end: true },
-  { label: "Exam Management", to: "/dashboard/lecturer/exams" },
-  { label: "Live Proctoring", to: "/dashboard/lecturer/proctoring" },
-  { label: "Submissions", to: "/dashboard/lecturer/submissions" },
-  { label: "Settings", to: "/dashboard/lecturer/settings" },
+  { label: "Create Exam", to: "/dashboard/lecturer/create-exam" },
+  { label: "My Exams", to: "/dashboard/lecturer/my-exams" },
+  { label: "Live Monitoring", to: "/dashboard/lecturer/live-monitoring" },
+  { label: "Reports", to: "/dashboard/lecturer/reports" },
+  { label: "Students", to: "/dashboard/lecturer/students" },
 ];
 
 export interface LecturerLayoutOutletContext {
@@ -78,7 +79,7 @@ export default function LecturerDashboardLayout() {
             Lecturer Workspace
           </Heading>
           <Text fontSize="sm" color="gray.600">
-            Exam operations and invigilation
+            Exam creation, monitoring, and analytics
           </Text>
         </VStack>
 

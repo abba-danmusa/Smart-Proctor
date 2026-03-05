@@ -19,8 +19,8 @@ export default function Dashboard() {
     return <Navigate to="/" replace />;
   }
 
-  if (user.role === "student") {
-    return <Navigate to={getDashboardPathForRole("student")} replace />;
+  if (user.role !== "admin") {
+    return <Navigate to={getDashboardPathForRole(user.role)} replace />;
   }
 
   const handleSignOut = async () => {
@@ -61,15 +61,13 @@ export default function Dashboard() {
             Role Dashboard
           </Text>
           <Heading size="lg" color="gray.800">
-            {user.role[0].toUpperCase()}
-            {user.role.slice(1)} workspace
+            Admin workspace
           </Heading>
           <Text color="gray.600">
-            Your role-specific dashboard is authenticated. Student dashboard pages are fully enabled at
-            {` ${getDashboardPathForRole("student")}.`}
+            Role-specific dashboards are configured for both students and lecturers.
           </Text>
           <Text color="gray.600">
-            This role view can now be expanded with lecturer/admin modules (exam creation, invigilation monitoring, and user management).
+            Use this admin route as the foundation for user management, audit controls, and platform settings.
           </Text>
           <Button onClick={handleSignOut} w="fit-content" variant="outline" colorPalette="blue">
             Sign out

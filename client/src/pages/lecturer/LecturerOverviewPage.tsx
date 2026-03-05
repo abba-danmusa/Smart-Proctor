@@ -1,6 +1,7 @@
 import { Box, Grid, Heading, Text, VStack } from "@chakra-ui/react";
 import { useOutletContext } from "react-router-dom";
 import type { LecturerLayoutOutletContext } from "./LecturerDashboardLayout";
+import { lecturerOverviewMetrics } from "./lecturerDashboardData";
 
 function StatCard({ title, value, subtitle }: { title: string; value: string; subtitle: string }) {
   return (
@@ -48,10 +49,26 @@ export default function LecturerOverviewPage() {
       </Box>
 
       <Grid templateColumns={{ base: "1fr", md: "repeat(2, minmax(0, 1fr))", xl: "repeat(4, minmax(0, 1fr))" }} gap={4}>
-        <StatCard title="Published Exams" value="12" subtitle="Total assessments available to students this term." />
-        <StatCard title="Live Sessions" value="2" subtitle="Active proctored sessions currently running." />
-        <StatCard title="Flagged Events" value="9" subtitle="Suspicious incidents requiring manual review." />
-        <StatCard title="Pending Grading" value="34" subtitle="Submitted scripts awaiting final score approval." />
+        <StatCard
+          title="Total Students"
+          value={String(lecturerOverviewMetrics.totalStudents)}
+          subtitle="Students currently mapped to your active courses."
+        />
+        <StatCard
+          title="Active Exams"
+          value={String(lecturerOverviewMetrics.activeExams)}
+          subtitle="Live exam sessions currently running."
+        />
+        <StatCard
+          title="Suspicious Activities (Last 7 Days)"
+          value={String(lecturerOverviewMetrics.suspiciousActivitiesLast7Days)}
+          subtitle="Proctoring incidents requiring lecturer review."
+        />
+        <StatCard
+          title="Exams Created"
+          value={String(lecturerOverviewMetrics.examsCreated)}
+          subtitle="Total exams configured this semester."
+        />
       </Grid>
     </VStack>
   );

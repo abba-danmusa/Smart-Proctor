@@ -8,6 +8,13 @@ import StudentExamsPage from "../pages/student/StudentExamsPage";
 import StudentResultsPage from "../pages/student/StudentResultsPage";
 import StudentProfileFaceIdPage from "../pages/student/StudentProfileFaceIdPage";
 import StudentSettingsPage from "../pages/student/StudentSettingsPage";
+import LecturerDashboardLayout from "../pages/lecturer/LecturerDashboardLayout";
+import LecturerOverviewPage from "../pages/lecturer/LecturerOverviewPage";
+import LecturerCreateExamPage from "../pages/lecturer/LecturerCreateExamPage";
+import LecturerMyExamsPage from "../pages/lecturer/LecturerMyExamsPage";
+import LecturerLiveMonitoringPage from "../pages/lecturer/LecturerLiveMonitoringPage";
+import LecturerReportsPage from "../pages/lecturer/LecturerReportsPage";
+import LecturerStudentsPage from "../pages/lecturer/LecturerStudentsPage";
 
 export default function AppRouter() {
   return (
@@ -16,7 +23,6 @@ export default function AppRouter() {
         <Route path="/" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/dashboard/lecturer" element={<Dashboard />} />
         <Route path="/dashboard/admin" element={<Dashboard />} />
         <Route path="/dashboard/student" element={<StudentDashboardLayout />}>
           <Route index element={<StudentOverviewPage />} />
@@ -24,6 +30,14 @@ export default function AppRouter() {
           <Route path="results" element={<StudentResultsPage />} />
           <Route path="profile" element={<StudentProfileFaceIdPage />} />
           <Route path="settings" element={<StudentSettingsPage />} />
+        </Route>
+        <Route path="/dashboard/lecturer" element={<LecturerDashboardLayout />}>
+          <Route index element={<LecturerOverviewPage />} />
+          <Route path="create-exam" element={<LecturerCreateExamPage />} />
+          <Route path="my-exams" element={<LecturerMyExamsPage />} />
+          <Route path="live-monitoring" element={<LecturerLiveMonitoringPage />} />
+          <Route path="reports" element={<LecturerReportsPage />} />
+          <Route path="students" element={<LecturerStudentsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
