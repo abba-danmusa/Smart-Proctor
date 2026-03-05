@@ -3,6 +3,7 @@ import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import FaceRegistrationStep from "../components/signup/FaceRegistrationStep";
+import { getDashboardPathForRole, saveSessionUser, type UserRole } from "../lib/authSession";
 
 type LoginFormData = {
   email: string;
@@ -11,10 +12,19 @@ type LoginFormData = {
 };
 
 type StatusTone = "success" | "warning" | "error";
+type SigninUser = {
+  id?: string;
+  email?: string;
+  fullName?: string;
+  role?: UserRole;
+  studentId?: string;
+  institution?: string;
+  department?: string;
+  level?: string;
+  faceCapture?: string;
+};
 type SigninResponseBody = {
-  user?: {
-    faceCapture?: string;
-  };
+  user?: SigninUser;
 };
 
 interface FaceApiRecognitionLike {
@@ -77,6 +87,14 @@ function FieldLabel({ htmlFor, text }: { htmlFor: string; text: string }) {
       {text}
     </label>
   );
+}
+
+function asNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function isUserRole(value: unknown): value is UserRole {
+  return value === "student" || value === "lecturer" || value === "admin";
 }
 
 async function getLoginErrorMessage(response: Response) {
@@ -312,9 +330,33 @@ export default function LoginPage() {
         throw new Error("Facial verification failed. Retake your face capture and try again.");
       }
 
+      const authenticatedUser = body.user;
+      const id = asNonEmptyString(authenticatedUser?.id);
+      const email = asNonEmptyString(authenticatedUser?.email);
+      const fullName = asNonEmptyString(authenticatedUser?.fullName);
+      const role = authenticatedUser?.role;
+
+      if (!id || !email || !fullName || !isUserRole(role)) {
+        await signOutSilently();
+        throw new Error("Authenticated user context is incomplete. Please sign in again.");
+      }
+
+      saveSessionUser({
+        id,
+        email,
+        fullName,
+        role,
+        studentId: asNonEmptyString(authenticatedUser?.studentId) ?? undefined,
+        institution: asNonEmptyString(authenticatedUser?.institution) ?? undefined,
+        department: asNonEmptyString(authenticatedUser?.department) ?? undefined,
+        level: asNonEmptyString(authenticatedUser?.level) ?? undefined,
+        faceCapture: enrolledFaceCapture,
+        faceVerifiedAt: new Date().toISOString(),
+      });
+
       setStatusMessage("Login successful. Redirecting...");
       setStatusTone("success");
-      navigate("/dashboard");
+      navigate(getDashboardPathForRole(role), { replace: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to sign in. Please try again.";
       setStatusMessage(message);
