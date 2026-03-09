@@ -13,6 +13,7 @@ const cors_1 = __importDefault(require("cors"));
 const create_exam_1 = require("./routes/create-exam");
 const create_course_1 = require("./routes/create-course");
 const list_courses_1 = require("./routes/list-courses");
+const register_course_1 = require("./routes/register-course");
 const generate_exam_questions_1 = require("./routes/generate-exam-questions");
 const list_exams_1 = require("./routes/list-exams");
 const start_exam_1 = require("./routes/start-exam");
@@ -49,6 +50,7 @@ app.use((0, cookie_session_1.default)({
 app.use(create_exam_1.createExamRouter);
 app.use(create_course_1.createCourseRouter);
 app.use(list_courses_1.listCoursesRouter);
+app.use(register_course_1.registerCourseRouter);
 app.use(generate_exam_questions_1.generateExamQuestionsRouter);
 app.use(list_exams_1.listExamsRouter);
 app.use(start_exam_1.startExamRouter);

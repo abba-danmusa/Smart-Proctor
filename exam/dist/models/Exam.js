@@ -17,6 +17,11 @@ const examSchema = new mongoose_1.Schema({
         minlength: 2,
         maxlength: 120,
     },
+    courseId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: 'Course',
+        default: null,
+    },
     courseCode: {
         type: String,
         trim: true,
@@ -191,6 +196,7 @@ const examSchema = new mongoose_1.Schema({
     },
 });
 examSchema.index({ institution: 1, startAt: 1, endAt: 1 });
+examSchema.index({ institution: 1, courseId: 1, startAt: 1 });
 examSchema.index({ 'createdBy.id': 1, startAt: -1 });
 examSchema.statics.build = function (attrs) {
     return new this(attrs);

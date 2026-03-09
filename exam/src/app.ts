@@ -9,6 +9,7 @@ import cors from 'cors'
 import { createExamRouter } from './routes/create-exam'
 import { createCourseRouter } from './routes/create-course'
 import { listCoursesRouter } from './routes/list-courses'
+import { registerCourseRouter } from './routes/register-course'
 import { generateExamQuestionsRouter } from './routes/generate-exam-questions'
 import { listExamsRouter } from './routes/list-exams'
 import { startExamRouter } from './routes/start-exam'
@@ -58,6 +59,7 @@ app.use(
 app.use(createExamRouter)
 app.use(createCourseRouter)
 app.use(listCoursesRouter)
+app.use(registerCourseRouter)
 app.use(generateExamQuestionsRouter)
 app.use(listExamsRouter)
 app.use(startExamRouter)

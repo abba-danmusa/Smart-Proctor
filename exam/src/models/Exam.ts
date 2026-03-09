@@ -1,4 +1,4 @@
-import { HydratedDocument, Model, Schema, model } from 'mongoose'
+import { HydratedDocument, Model, Schema, Types, model } from 'mongoose'
 
 import type { CourseType } from './Course'
 import type { QuestionDifficulty } from '../services/question-generator'
@@ -35,6 +35,7 @@ export interface ExamQuestionGeneration {
 export interface IExam {
   title: string
   course: string
+  courseId?: Types.ObjectId | null
   courseCode?: string | null
   courseType?: CourseType | null
   durationMinutes: number
@@ -52,6 +53,7 @@ export interface IExam {
 export type ExamAttrs = {
   title: string
   course: string
+  courseId?: Types.ObjectId | null
   courseCode?: string | null
   courseType?: CourseType | null
   durationMinutes: number
@@ -91,6 +93,11 @@ const examSchema = new Schema<IExam, Model<IExam> & ModelStatics>(
       trim: true,
       minlength: 2,
       maxlength: 120,
+    },
+    courseId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Course',
+      default: null,
     },
     courseCode: {
       type: String,
@@ -269,6 +276,7 @@ const examSchema = new Schema<IExam, Model<IExam> & ModelStatics>(
 )
 
 examSchema.index({ institution: 1, startAt: 1, endAt: 1 })
+examSchema.index({ institution: 1, courseId: 1, startAt: 1 })
 examSchema.index({ 'createdBy.id': 1, startAt: -1 })
 
 examSchema.statics.build = function(attrs: ExamAttrs) {

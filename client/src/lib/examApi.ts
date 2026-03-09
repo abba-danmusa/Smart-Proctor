@@ -37,12 +37,25 @@ export interface CourseRecord {
     email: string
     fullName: string
   }
+  isRegistered?: boolean
+  registeredAt?: string
+}
+
+export interface CourseRegistrationRecord {
+  id: string
+  courseId: string
+  studentId: string
+  studentEmail: string
+  studentFullName: string
+  institution: string
+  registeredAt?: string
 }
 
 export interface ExamRecord {
   id: string
   title: string
   course: string
+  courseId?: string
   courseCode?: string
   courseType?: CourseType
   durationMinutes: number
@@ -225,6 +238,21 @@ export async function fetchCourses(user: SessionUser) {
 
   const body = (await response.json()) as { courses: CourseRecord[] }
   return body.courses
+}
+
+export async function registerForCourse(courseId: string, user: SessionUser) {
+  const response = await fetch(buildExamApiUrl(`courses/${courseId}/register`), {
+    method: 'POST',
+    credentials: 'include',
+    headers: buildExamApiHeaders(user),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiErrorMessage(response, 'Unable to register for this course right now.'))
+  }
+
+  const body = (await response.json()) as { registration: CourseRegistrationRecord }
+  return body.registration
 }
 
 export async function generateExamQuestions(input: GenerateQuestionsInput, user: SessionUser) {

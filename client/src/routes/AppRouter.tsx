@@ -4,6 +4,7 @@ import SignupPage from "../pages/SignupPage.tsx";
 import Dashboard from "../pages/Dashboard.tsx";
 import StudentDashboardLayout from "../pages/student/StudentDashboardLayout";
 import StudentOverviewPage from "../pages/student/StudentOverviewPage";
+import StudentCoursesPage from "../pages/student/StudentCoursesPage";
 import StudentExamsPage from "../pages/student/StudentExamsPage";
 import StudentResultsPage from "../pages/student/StudentResultsPage";
 import StudentProfileFaceIdPage from "../pages/student/StudentProfileFaceIdPage";
@@ -40,6 +41,7 @@ export default function AppRouter() {
         </Route>
         <Route path="/dashboard/student" element={<StudentDashboardLayout />}>
           <Route index element={<StudentOverviewPage />} />
+          <Route path="courses" element={<StudentCoursesPage />} />
           <Route path="exams" element={<StudentExamsPage />} />
           <Route path="results" element={<StudentResultsPage />} />
           <Route path="profile" element={<StudentProfileFaceIdPage />} />

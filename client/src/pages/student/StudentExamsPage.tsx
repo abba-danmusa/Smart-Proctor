@@ -1,14 +1,32 @@
 import { Badge, Box, Button, Flex, Grid, Heading, Text, VStack } from "@chakra-ui/react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
+import { fetchExams, startExamAttempt, type ExamRecord } from "../../lib/examApi";
 import type { StudentLayoutOutletContext } from "./StudentDashboardLayout";
-import { studentExamRecords, type StudentExamRecord } from "./studentDashboardData";
 
 type StepStatus = "idle" | "running" | "passed" | "failed";
+type StudentExamStatus = "upcoming" | "active" | "completed" | "expired";
 
-function getExamStatusColor(status: StudentExamRecord["status"]) {
+function getExamStatus(exam: ExamRecord): StudentExamStatus {
+  if (exam.studentStatus) {
+    return exam.studentStatus;
+  }
+
+  if (exam.status === "live") {
+    return "active";
+  }
+
+  if (exam.status === "expired") {
+    return "expired";
+  }
+
+  return "upcoming";
+}
+
+function getExamStatusColor(status: StudentExamStatus) {
   if (status === "completed") return "green";
   if (status === "active") return "orange";
+  if (status === "expired") return "red";
   return "blue";
 }
 
@@ -26,6 +44,22 @@ function getStepStatusLabel(status: StepStatus) {
   return "Not started";
 }
 
+function getExamActionLabel(status: StudentExamStatus) {
+  if (status === "completed") return "Completed";
+  if (status === "expired") return "Expired";
+  if (status === "upcoming") return "Upcoming";
+  return "Start";
+}
+
+function formatExamDateLabel(exam: ExamRecord) {
+  const startDate = new Date(exam.startAt);
+  if (Number.isNaN(startDate.getTime())) {
+    return "Date unavailable";
+  }
+
+  return startDate.toLocaleString();
+}
+
 async function runProctoringDeviceCheck() {
   if (!navigator.mediaDevices?.getUserMedia) {
     return false;
@@ -41,19 +75,41 @@ async function runProctoringDeviceCheck() {
 
 export default function StudentExamsPage() {
   const { user } = useOutletContext<StudentLayoutOutletContext>();
+  const [exams, setExams] = useState<ExamRecord[]>([]);
+  const [isLoadingExams, setIsLoadingExams] = useState(true);
+  const [isStartingExam, setIsStartingExam] = useState(false);
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
   const [faceCheckStatus, setFaceCheckStatus] = useState<StepStatus>("idle");
   const [deviceCheckStatus, setDeviceCheckStatus] = useState<StepStatus>("idle");
   const [launchMessage, setLaunchMessage] = useState<string | null>(null);
+  const [examFeedback, setExamFeedback] = useState<string | null>(null);
 
-  const selectedExam = useMemo(
-    () => studentExamRecords.find((exam) => exam.id === selectedExamId) ?? null,
-    [selectedExamId],
-  );
-  const canLaunchExam = faceCheckStatus === "passed" && deviceCheckStatus === "passed";
+  const loadExams = useCallback(async () => {
+    setIsLoadingExams(true);
+    setExamFeedback(null);
 
-  const startExamFlow = (exam: StudentExamRecord) => {
-    if (exam.status !== "active") {
+    try {
+      const fetchedExams = await fetchExams(user);
+      setExams(fetchedExams);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load exams right now.";
+      setExamFeedback(message);
+    } finally {
+      setIsLoadingExams(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadExams();
+  }, [loadExams]);
+
+  const selectedExam = useMemo(() => exams.find((exam) => exam.id === selectedExamId) ?? null, [exams, selectedExamId]);
+  const selectedExamStatus = selectedExam ? getExamStatus(selectedExam) : "upcoming";
+  const canLaunchExam =
+    selectedExamStatus === "active" && faceCheckStatus === "passed" && deviceCheckStatus === "passed" && !isStartingExam;
+
+  const startExamFlow = (exam: ExamRecord) => {
+    if (getExamStatus(exam) !== "active") {
       return;
     }
 
@@ -101,12 +157,26 @@ export default function StudentExamsPage() {
     }
   };
 
-  const handleLaunchExam = () => {
+  const handleLaunchExam = async () => {
     if (!canLaunchExam || !selectedExam) {
       return;
     }
 
-    setLaunchMessage(`Exam launch authorized for ${selectedExam.title}. Proctoring stream is now active.`);
+    setIsStartingExam(true);
+    setLaunchMessage(`Starting ${selectedExam.title}...`);
+
+    try {
+      const attempt = await startExamAttempt(selectedExam.id, user);
+      setLaunchMessage(
+        `Exam launch authorized for ${selectedExam.title}. Session started at ${new Date(attempt.startedAt).toLocaleTimeString()}.`,
+      );
+      await loadExams();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to start this exam.";
+      setLaunchMessage(message);
+    } finally {
+      setIsStartingExam(false);
+    }
   };
 
   return (
@@ -115,8 +185,16 @@ export default function StudentExamsPage() {
         <Heading size="lg" color="gray.800" mb={1}>
           My Exams
         </Heading>
-        <Text color="gray.600">Start active exams and complete required proctoring checks before launch.</Text>
+        <Text color="gray.600">Exams published for courses you registered will appear here.</Text>
       </Box>
+
+      {examFeedback ? (
+        <Box rounded="xl" border="1px solid" borderColor="red.200" bg="red.50" px={4} py={3}>
+          <Text fontSize="sm" color="red.800">
+            {examFeedback}
+          </Text>
+        </Box>
+      ) : null}
 
       <Box
         rounded="2xl"
@@ -148,38 +226,61 @@ export default function StudentExamsPage() {
         </Grid>
 
         <VStack align="stretch" gap={0} minW="820px">
-          {studentExamRecords.map((exam) => (
-            <Grid
-              key={exam.id}
-              templateColumns="minmax(210px, 2fr) minmax(160px, 1.4fr) minmax(190px, 1.5fr) minmax(120px, 1fr) minmax(140px, 1fr)"
-              gap={4}
-              px={5}
-              py={4}
-              borderTopWidth="1px"
-              borderColor="gray.100"
-              alignItems="center"
-            >
-              <Text color="gray.800" fontWeight="semibold">
-                {exam.title}
+          {isLoadingExams ? (
+            <Box px={5} py={6}>
+              <Text fontSize="sm" color="gray.600">
+                Loading exams...
               </Text>
-              <Text color="gray.600">{exam.course}</Text>
-              <Text color="gray.600" fontSize="sm">
-                {exam.dateLabel}
+            </Box>
+          ) : null}
+
+          {!isLoadingExams && exams.length === 0 ? (
+            <Box px={5} py={6}>
+              <Text fontSize="sm" color="gray.600">
+                No exams are published for your registered courses yet.
               </Text>
-              <Badge colorPalette={getExamStatusColor(exam.status)} w="fit-content">
-                {exam.status}
-              </Badge>
-              <Button
-                size="sm"
-                colorPalette="blue"
-                variant={selectedExamId === exam.id ? "solid" : "outline"}
-                disabled={exam.status !== "active"}
-                onClick={() => startExamFlow(exam)}
-              >
-                Start
-              </Button>
-            </Grid>
-          ))}
+            </Box>
+          ) : null}
+
+          {!isLoadingExams
+            ? exams.map((exam) => {
+                const examStatus = getExamStatus(exam);
+                const canStart = examStatus === "active";
+
+                return (
+                  <Grid
+                    key={exam.id}
+                    templateColumns="minmax(210px, 2fr) minmax(160px, 1.4fr) minmax(190px, 1.5fr) minmax(120px, 1fr) minmax(140px, 1fr)"
+                    gap={4}
+                    px={5}
+                    py={4}
+                    borderTopWidth="1px"
+                    borderColor="gray.100"
+                    alignItems="center"
+                  >
+                    <Text color="gray.800" fontWeight="semibold">
+                      {exam.title}
+                    </Text>
+                    <Text color="gray.600">{exam.courseCode ? `${exam.courseCode} - ${exam.course}` : exam.course}</Text>
+                    <Text color="gray.600" fontSize="sm">
+                      {formatExamDateLabel(exam)}
+                    </Text>
+                    <Badge colorPalette={getExamStatusColor(examStatus)} w="fit-content">
+                      {examStatus}
+                    </Badge>
+                    <Button
+                      size="sm"
+                      colorPalette="blue"
+                      variant={selectedExamId === exam.id ? "solid" : "outline"}
+                      disabled={!canStart}
+                      onClick={() => startExamFlow(exam)}
+                    >
+                      {getExamActionLabel(examStatus)}
+                    </Button>
+                  </Grid>
+                );
+              })
+            : null}
         </VStack>
       </Box>
 
@@ -236,7 +337,7 @@ export default function StudentExamsPage() {
               <Text fontSize="sm" color="gray.700">
                 Exam start authorization
               </Text>
-              <Button colorPalette="blue" disabled={!canLaunchExam} onClick={handleLaunchExam}>
+              <Button colorPalette="blue" disabled={!canLaunchExam} onClick={() => void handleLaunchExam()} loading={isStartingExam}>
                 Launch Exam
               </Button>
             </Flex>

@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listExamsRouter = void 0;
 const express_1 = __importDefault(require("express"));
 const medlink_common_1 = require("@danmusa/medlink-common");
+const Course_1 = require("../models/Course");
+const CourseRegistration_1 = require("../models/CourseRegistration");
 const Exam_1 = require("../models/Exam");
 const ExamAttempt_1 = require("../models/ExamAttempt");
 const exam_status_1 = require("../services/exam-status");
@@ -15,6 +17,9 @@ exports.listExamsRouter = router;
 router.get('/api/exams', medlink_common_1.currentUser, medlink_common_1.requireAuth, async (req, res) => {
     const requester = (0, requester_context_1.getRequesterContext)(req);
     const query = {};
+    let registeredCourseIds = [];
+    let registeredCourseCodes = [];
+    let registeredCourseTitles = [];
     if (requester.role === 'lecturer') {
         query['createdBy.id'] = requester.id;
     }
@@ -23,6 +28,34 @@ router.get('/api/exams', medlink_common_1.currentUser, medlink_common_1.requireA
             throw new medlink_common_1.BadRequestError('Student institution is required to fetch exams');
         }
         query.institution = requester.institution;
+        const registrations = await CourseRegistration_1.CourseRegistration.find({
+            studentId: requester.id,
+            institution: requester.institution,
+        }).select({ courseId: 1 });
+        if (registrations.length === 0) {
+            return res.status(200).send({ exams: [] });
+        }
+        registeredCourseIds = registrations.map((registration) => registration.courseId);
+        const registeredCourses = await Course_1.Course.find({
+            _id: { $in: registeredCourseIds },
+            institution: requester.institution,
+        }).select({ code: 1, title: 1 });
+        registeredCourseCodes = [...new Set(registeredCourses.map((course) => course.code))];
+        registeredCourseTitles = [...new Set(registeredCourses.map((course) => course.title))];
+        const courseScopeFilters = [];
+        if (registeredCourseIds.length > 0) {
+            courseScopeFilters.push({ courseId: { $in: registeredCourseIds } });
+        }
+        if (registeredCourseCodes.length > 0) {
+            courseScopeFilters.push({ courseCode: { $in: registeredCourseCodes } });
+        }
+        if (registeredCourseTitles.length > 0) {
+            courseScopeFilters.push({ course: { $in: registeredCourseTitles } });
+        }
+        if (courseScopeFilters.length === 0) {
+            return res.status(200).send({ exams: [] });
+        }
+        query.$or = courseScopeFilters;
     }
     const exams = await Exam_1.Exam.find(query).sort({ startAt: 1 });
     const examObjectIds = exams.map((exam) => exam._id);
@@ -53,6 +86,7 @@ router.get('/api/exams', medlink_common_1.currentUser, medlink_common_1.requireA
                 id: exam.id,
                 title: exam.title,
                 course: exam.course,
+                courseId: exam.courseId?.toString(),
                 courseCode: exam.courseCode ?? undefined,
                 courseType: exam.courseType ?? undefined,
                 durationMinutes: exam.durationMinutes,
@@ -73,6 +107,7 @@ router.get('/api/exams', medlink_common_1.currentUser, medlink_common_1.requireA
             id: exam.id,
             title: exam.title,
             course: exam.course,
+            courseId: exam.courseId?.toString(),
             courseCode: exam.courseCode ?? undefined,
             courseType: exam.courseType ?? undefined,
             durationMinutes: exam.durationMinutes,
