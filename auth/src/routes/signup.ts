@@ -195,6 +195,12 @@ router.post(
       {
         id: user.id,
         email: user.email,
+        role: user.role,
+        fullName: user.fullName,
+        institution: user.institution,
+        department: user.department,
+        studentId: user.studentId,
+        staffId: user.staffId,
       },
       process.env.JWT_SECRET!
     );

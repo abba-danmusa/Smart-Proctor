@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exam-depl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: exam
+  template:
+    metadata:
+      labels:
+        app: exam
+    spec:
+      containers:
+        - name: exam
+          image: abbadanmusa/smart-proctor-exam
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "192Mi"
+            requests:
+              cpu: "200m"
+              memory: "192Mi"
+          env:
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: exam-mongo-secret
+                  key: MONGO_URI
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: auth-secret
+                  key: JWT_SECRET
+            - name: NATS_CLIENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NATS_URL
+              value: 'http://nats-srv:4222'
+            - name: NATS_CLUSTER_ID
+              value: 'smart-proctor-nats'
+            - name: CORY-sW8!RxfTAh9RpS_ALLOWED_ORIGINS
+              value: 'http://localhost:5173,https://smartproctor.dev,https://www.smartproctor.dev,https://494a9d6e096e.ngrok-free.app'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: exam-srv
+spec:
+  type: ClusterIP
+  selector:
+    app: exam
+  ports:
+    - name: exam
+      protocol: TCP
+      port: 3001
+      targetPort: 3001

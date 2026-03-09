@@ -17,13 +17,20 @@ spec:
                 name: auth-srv
                 port:
                   number: 3000
+          - path: /api/exams/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: exam-srv
+                port:
+                  number: 3001
           - path: /api/query/?(.*)
             pathType: ImplementationSpecific
             backend:
               service:
                 name: query-srv
                 port:
-                  number: 3001
+                  number: 3002
           - path: /?(.*)
             pathType: ImplementationSpecific
             backend:
@@ -39,6 +46,13 @@ spec:
             backend:
               service:
                 name: auth-srv
+                port:
+                  number: 3000
+          - path: /api/exams/?(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: exam-srv
                 port:
                   number: 3000
           - path: /api/query/?(.*)

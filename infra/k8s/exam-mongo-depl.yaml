@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exam-mongo-depl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: exam-mongo
+  template:
+    metadata:
+      labels:
+        app: exam-mongo
+    spec:
+      containers:
+        - name: exam-mongo
+          image: mongo:5.0.19
+          ports:
+            - containerPort: 27017
+              name: db-port
+          readinessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: exam-mongo-srv
+spec:
+  type: ClusterIP
+  selector:
+    app: exam-mongo
+  ports:
+    - name: db
+      protocol: TCP
+      port: 27017
+      targetPort: 27017
