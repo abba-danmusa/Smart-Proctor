@@ -3,9 +3,6 @@ import { app } from './app'
 import { natsWrapper } from './nats-wrapper'
 
 const start = async () => {
-  // process.env.JWT_SECRET = 'asdf'
-  // process.env.MONGO_URI = 'mongodb+srv://abbadanmusa:Loveyou@247377@abbadanmusa.sahh1ix.mongodb.net/?appName=abbaDanmusa'
-
   if (!process.env.JWT_SECRET) {
     throw new Error('JWT_SECRET must be defined')
   }
@@ -42,14 +39,15 @@ const start = async () => {
     process.on('SIGTERM', () => natsWrapper.client.close())
 
     await mongoose.connect(process.env.MONGO_URI)
-    // await mongoose.connect('mongodb://127.0.0.1/auth')
     console.log('Connected to mongoose')
   } catch (error) {
     console.error(error)
   }
 
-  app.listen('3000', () => {
-    console.log('Auth Service listening on port 3000')
+  const port = Number(process.env.PORT ?? 3001)
+
+  app.listen(port, () => {
+    console.log(`Exam Service listening on port ${port}`)
   })
 }
 

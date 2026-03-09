@@ -22,6 +22,14 @@ build:
         manual:
           - src: 'src/**/*.ts'
             dest: .
+    - image: abbadanmusa/smart-proctor-exam
+      context: exam
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual:
+          - src: 'src/**/*.ts'
+            dest: .
     - image: abbadanmusa/smart-proctor-client
       context: client
       docker:
