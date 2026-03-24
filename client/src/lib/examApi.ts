@@ -89,6 +89,62 @@ export interface ExamAttemptRecord {
   integrityScore?: number
 }
 
+export interface ExamSessionQuestionRecord {
+  questionNumber: number
+  topic: string
+  difficulty: QuestionDifficulty
+  prompt: string
+  options: string[]
+}
+
+export interface StudentExamSessionRecord {
+  exam: {
+    id: string
+    title: string
+    course: string
+    courseCode?: string
+    durationMinutes: number
+    startAt: string
+    endAt: string
+    instructions?: string
+    proctoring: ExamProctoringSettings
+  }
+  attempt: {
+    id: string
+    status: ExamAttemptStatus
+    startedAt: string
+  }
+  questions: ExamSessionQuestionRecord[]
+  serverTime: string
+}
+
+export type ProctoringEventSeverity = 'low' | 'medium' | 'high'
+
+export interface ProctoringEventInput {
+  eventType: string
+  severity?: ProctoringEventSeverity
+  message: string
+  evidence?: Record<string, unknown>
+  detectedAt?: string
+}
+
+export interface ProctoringEventRecord {
+  id: string
+  examId: string
+  examTitle?: string
+  examCourse?: string
+  examCourseCode?: string
+  attemptId?: string
+  studentId: string
+  studentEmail: string
+  studentFullName?: string
+  eventType: string
+  severity: ProctoringEventSeverity
+  message: string
+  evidence?: Record<string, unknown>
+  detectedAt: string
+}
+
 export interface CreateCourseInput {
   code: string
   title: string
@@ -347,4 +403,77 @@ export async function submitExamAttempt(
 
   const body = (await response.json()) as { attempt: ExamAttemptRecord }
   return body.attempt
+}
+
+export async function fetchStudentExamSession(examId: string, user: SessionUser) {
+  const response = await fetch(buildExamApiUrl(`${examId}/session`), {
+    method: 'GET',
+    credentials: 'include',
+    headers: buildExamApiHeaders(user),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiErrorMessage(response, 'Unable to load this exam session right now.'))
+  }
+
+  const body = (await response.json()) as { session: StudentExamSessionRecord }
+  return body.session
+}
+
+export async function reportExamProctoringEvent(examId: string, user: SessionUser, payload: ProctoringEventInput) {
+  const response = await fetch(buildExamApiUrl(`${examId}/proctoring/events`), {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildExamApiHeaders(user),
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiErrorMessage(response, 'Unable to report this proctoring event.'))
+  }
+
+  const body = (await response.json()) as { event: ProctoringEventRecord }
+  return body.event
+}
+
+export async function fetchLecturerProctoringEvents(
+  user: SessionUser,
+  query?: {
+    examId?: string
+    studentId?: string
+    limit?: number
+  }
+) {
+  const searchParams = new URLSearchParams()
+
+  if (query?.examId) {
+    searchParams.set('examId', query.examId)
+  }
+
+  if (query?.studentId) {
+    searchParams.set('studentId', query.studentId)
+  }
+
+  if (typeof query?.limit === 'number' && Number.isFinite(query.limit) && query.limit > 0) {
+    searchParams.set('limit', String(Math.floor(query.limit)))
+  }
+
+  const queryString = searchParams.toString()
+  const path = queryString ? `proctoring/events?${queryString}` : 'proctoring/events'
+
+  const response = await fetch(buildExamApiUrl(path), {
+    method: 'GET',
+    credentials: 'include',
+    headers: buildExamApiHeaders(user),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiErrorMessage(response, 'Unable to load proctoring events right now.'))
+  }
+
+  const body = (await response.json()) as { events: ProctoringEventRecord[] }
+  return body.events
 }

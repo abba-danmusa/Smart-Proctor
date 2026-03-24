@@ -15,6 +15,9 @@ import { listExamsRouter } from './routes/list-exams'
 import { startExamRouter } from './routes/start-exam'
 import { submitExamRouter } from './routes/submit-exam'
 import { expireExamRouter } from './routes/expire-exam'
+import { getExamSessionRouter } from './routes/get-exam-session'
+import { reportProctoringEventRouter } from './routes/report-proctoring-event'
+import { listProctoringEventsRouter } from './routes/list-proctoring-events'
 
 const app = express()
 const defaultAllowedOrigins = [
@@ -65,6 +68,9 @@ app.use(listExamsRouter)
 app.use(startExamRouter)
 app.use(submitExamRouter)
 app.use(expireExamRouter)
+app.use(getExamSessionRouter)
+app.use(reportProctoringEventRouter)
+app.use(listProctoringEventsRouter)
 
 app.use((_req, _res, _next) => {
   throw new NotFoundError()

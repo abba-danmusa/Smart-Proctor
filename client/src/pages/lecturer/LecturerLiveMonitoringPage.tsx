@@ -1,6 +1,23 @@
 import { Badge, Box, Button, Flex, Grid, Heading, Portal, Text, VStack } from "@chakra-ui/react";
-import { useMemo, useState } from "react";
-import { liveMonitoringRecords, type EventSeverity, type LiveMonitoringRecord } from "./lecturerDashboardData";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
+import { fetchLecturerProctoringEvents, type ProctoringEventRecord } from "../../lib/examApi";
+import type { LecturerLayoutOutletContext } from "./LecturerDashboardLayout";
+import {
+  liveMonitoringRecords,
+  type CameraStatus,
+  type EventSeverity,
+  type FaceStatus,
+  type LiveMonitoringRecord,
+} from "./lecturerDashboardData";
+
+interface MonitoringGroup {
+  examId: string;
+  studentId: string;
+  studentName: string;
+  examTitle: string;
+  events: ProctoringEventRecord[];
+}
 
 function getCameraStatusColor(status: LiveMonitoringRecord["cameraStatus"]) {
   if (status === "online") return "green";
@@ -38,13 +55,169 @@ function formatIntegrityColor(score: number) {
   return "red";
 }
 
-export default function LecturerLiveMonitoringPage() {
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+function formatEventLabel(eventType: string) {
+  return eventType
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
-  const selectedRecord = useMemo(
-    () => liveMonitoringRecords.find((record) => record.id === selectedRecordId) ?? null,
-    [selectedRecordId],
-  );
+function formatEventTimeLabel(isoDate: string) {
+  const parsedDate = new Date(isoDate);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "Unknown time";
+  }
+
+  return parsedDate.toLocaleString();
+}
+
+function toEventSeverity(severity: ProctoringEventRecord["severity"]): EventSeverity {
+  if (severity === "high") return "high";
+  if (severity === "medium") return "medium";
+  return "low";
+}
+
+function inferCameraStatus(events: ProctoringEventRecord[]): CameraStatus {
+  const eventTypes = events.map((event) => event.eventType);
+
+  if (eventTypes.some((eventType) => eventType.includes("camera_offline") || eventType.includes("device_access_blocked"))) {
+    return "offline";
+  }
+
+  if (eventTypes.some((eventType) => eventType.includes("camera") || eventType.includes("fullscreen"))) {
+    return "unstable";
+  }
+
+  return "online";
+}
+
+function inferFaceStatus(events: ProctoringEventRecord[]): FaceStatus {
+  if (events.some((event) => event.eventType.includes("multiple_faces"))) {
+    return "multiple_faces";
+  }
+
+  if (events.some((event) => event.eventType.includes("face_not_detected"))) {
+    return "not_detected";
+  }
+
+  return "verified";
+}
+
+function buildMonitoringRecords(events: ProctoringEventRecord[]) {
+  const groupedMap = new Map<string, MonitoringGroup>();
+
+  for (const event of events) {
+    const key = `${event.examId}:${event.studentId}`;
+    const currentGroup = groupedMap.get(key);
+
+    if (currentGroup) {
+      currentGroup.events.push(event);
+      continue;
+    }
+
+    groupedMap.set(key, {
+      examId: event.examId,
+      studentId: event.studentId,
+      studentName: event.studentFullName ?? event.studentEmail,
+      examTitle: event.examTitle ?? "Exam Session",
+      events: [event],
+    });
+  }
+
+  const groupedRecords = [...groupedMap.values()].map((group) => {
+    const eventsByRecency = group.events.slice().sort((first, second) => {
+      return new Date(second.detectedAt).getTime() - new Date(first.detectedAt).getTime();
+    });
+
+    const highCount = eventsByRecency.filter((event) => event.severity === "high").length;
+    const mediumCount = eventsByRecency.filter((event) => event.severity === "medium").length;
+    const lowCount = eventsByRecency.filter((event) => event.severity === "low").length;
+    const suspiciousEventsCount = highCount + mediumCount;
+    const integrityScore = Math.max(0, 100 - highCount * 12 - mediumCount * 6 - lowCount * 2);
+
+    return {
+      id: `live-${group.examId}-${group.studentId}`,
+      studentName: group.studentName,
+      examTitle: group.examTitle,
+      cameraStatus: inferCameraStatus(eventsByRecency),
+      faceStatus: inferFaceStatus(eventsByRecency),
+      suspiciousEventsCount,
+      integrityScore,
+      screenshots: eventsByRecency
+        .filter((event) => {
+          const evidence = event.evidence ?? {};
+          const frameDataUrl = evidence["frameDataUrl"];
+          return typeof frameDataUrl === "string" && frameDataUrl.length > 0;
+        })
+        .slice(0, 8)
+        .map((event) => ({
+          id: `shot-${event.id}`,
+          capturedAt: formatEventTimeLabel(event.detectedAt),
+          reason: event.message,
+        })),
+      activityLogs: eventsByRecency.slice(0, 18).map((event) => ({
+        id: `log-${event.id}`,
+        timestamp: formatEventTimeLabel(event.detectedAt),
+        event: `${formatEventLabel(event.eventType)} - ${event.message}`,
+        severity: toEventSeverity(event.severity),
+      })),
+      latestDetectedAt: eventsByRecency[0]?.detectedAt ?? "",
+    };
+  });
+
+  groupedRecords.sort((first, second) => {
+    if (first.suspiciousEventsCount !== second.suspiciousEventsCount) {
+      return second.suspiciousEventsCount - first.suspiciousEventsCount;
+    }
+
+    return new Date(second.latestDetectedAt).getTime() - new Date(first.latestDetectedAt).getTime();
+  });
+
+  return groupedRecords.map(({ latestDetectedAt: _latestDetectedAt, ...record }) => record satisfies LiveMonitoringRecord);
+}
+
+export default function LecturerLiveMonitoringPage() {
+  const { user } = useOutletContext<LecturerLayoutOutletContext>();
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [records, setRecords] = useState<LiveMonitoringRecord[]>(liveMonitoringRecords);
+  const [isLoadingRecords, setIsLoadingRecords] = useState(false);
+  const [monitoringFeedback, setMonitoringFeedback] = useState<string | null>(null);
+
+  const selectedRecord = useMemo(() => records.find((record) => record.id === selectedRecordId) ?? null, [records, selectedRecordId]);
+
+  const loadMonitoringRecords = useCallback(async () => {
+    setIsLoadingRecords(true);
+    setMonitoringFeedback(null);
+
+    try {
+      const events = await fetchLecturerProctoringEvents(user, { limit: 600 });
+      if (events.length === 0) {
+        setRecords(liveMonitoringRecords);
+        return;
+      }
+
+      const liveRecords = buildMonitoringRecords(events);
+      setRecords(liveRecords.length > 0 ? liveRecords : liveMonitoringRecords);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load live monitoring events right now.";
+      setMonitoringFeedback(message);
+      setRecords(liveMonitoringRecords);
+    } finally {
+      setIsLoadingRecords(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadMonitoringRecords();
+
+    const refreshTimer = window.setInterval(() => {
+      void loadMonitoringRecords();
+    }, 12000);
+
+    return () => {
+      window.clearInterval(refreshTimer);
+    };
+  }, [loadMonitoringRecords]);
 
   return (
     <VStack align="stretch" gap={6}>
@@ -64,6 +237,25 @@ export default function LecturerLiveMonitoringPage() {
         </Heading>
         <Text color="gray.600">Watch exam sessions in real-time, inspect suspicious behavior, and review integrity evidence.</Text>
       </Box>
+
+      {monitoringFeedback ? (
+        <Box rounded="xl" border="1px solid" borderColor="orange.300" bg="orange.50" px={4} py={3}>
+          <Text fontSize="sm" color="orange.800">
+            {monitoringFeedback}
+          </Text>
+        </Box>
+      ) : null}
+
+      <Flex justify="space-between" align="center" gap={3} flexWrap="wrap">
+        <Text fontSize="sm" color="gray.600">
+          {isLoadingRecords
+            ? "Refreshing proctoring stream..."
+            : "Live suspicious events update automatically every 12 seconds."}
+        </Text>
+        <Button size="sm" variant="outline" colorPalette="teal" onClick={() => void loadMonitoringRecords()} loading={isLoadingRecords}>
+          Refresh stream
+        </Button>
+      </Flex>
 
       <Box
         rounded="2xl"
@@ -96,7 +288,7 @@ export default function LecturerLiveMonitoringPage() {
         </Grid>
 
         <VStack align="stretch" gap={0} minW="980px">
-          {liveMonitoringRecords.map((record) => (
+          {records.map((record) => (
             <Grid
               key={record.id}
               templateColumns="minmax(230px, 2fr) minmax(130px, 1fr) minmax(170px, 1.3fr) minmax(170px, 1.2fr) minmax(140px, 1fr) minmax(130px, 1fr)"
@@ -166,18 +358,16 @@ export default function LecturerLiveMonitoringPage() {
               </Flex>
 
               <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={4}>
-                <Box
-                  rounded="xl"
-                  border="1px solid"
-                  borderColor="gray.200"
-                  bg="gray.50"
-                  p={4}
-                  minH="220px"
-                >
+                <Box rounded="xl" border="1px solid" borderColor="gray.200" bg="gray.50" p={4} minH="220px">
                   <Heading size="sm" color="gray.800" mb={3}>
                     Recorded Screenshots
                   </Heading>
                   <VStack align="stretch" gap={3}>
+                    {selectedRecord.screenshots.length === 0 ? (
+                      <Text fontSize="sm" color="gray.600">
+                        No screenshot evidence captured yet for this session.
+                      </Text>
+                    ) : null}
                     {selectedRecord.screenshots.map((shot) => (
                       <Box
                         key={shot.id}
@@ -208,14 +398,7 @@ export default function LecturerLiveMonitoringPage() {
                   </VStack>
                 </Box>
 
-                <Box
-                  rounded="xl"
-                  border="1px solid"
-                  borderColor="gray.200"
-                  bg="gray.50"
-                  p={4}
-                  minH="220px"
-                >
+                <Box rounded="xl" border="1px solid" borderColor="gray.200" bg="gray.50" p={4} minH="220px">
                   <Heading size="sm" color="gray.800" mb={3}>
                     Activity Logs
                   </Heading>

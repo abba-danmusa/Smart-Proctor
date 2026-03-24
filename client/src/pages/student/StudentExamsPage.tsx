@@ -1,6 +1,6 @@
 import { Badge, Box, Button, Flex, Grid, Heading, Text, VStack } from "@chakra-ui/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
 import { fetchExams, startExamAttempt, type ExamRecord } from "../../lib/examApi";
 import type { StudentLayoutOutletContext } from "./StudentDashboardLayout";
 
@@ -44,10 +44,11 @@ function getStepStatusLabel(status: StepStatus) {
   return "Not started";
 }
 
-function getExamActionLabel(status: StudentExamStatus) {
+function getExamActionLabel(status: StudentExamStatus, attemptStatus?: ExamRecord["attemptStatus"]) {
   if (status === "completed") return "Completed";
   if (status === "expired") return "Expired";
   if (status === "upcoming") return "Upcoming";
+  if (attemptStatus === "in_progress") return "Resume";
   return "Start";
 }
 
@@ -75,12 +76,15 @@ async function runProctoringDeviceCheck() {
 
 export default function StudentExamsPage() {
   const { user } = useOutletContext<StudentLayoutOutletContext>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [exams, setExams] = useState<ExamRecord[]>([]);
   const [isLoadingExams, setIsLoadingExams] = useState(true);
   const [isStartingExam, setIsStartingExam] = useState(false);
   const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
   const [faceCheckStatus, setFaceCheckStatus] = useState<StepStatus>("idle");
   const [deviceCheckStatus, setDeviceCheckStatus] = useState<StepStatus>("idle");
+  const [hasAcceptedRules, setHasAcceptedRules] = useState(false);
   const [launchMessage, setLaunchMessage] = useState<string | null>(null);
   const [examFeedback, setExamFeedback] = useState<string | null>(null);
 
@@ -103,10 +107,24 @@ export default function StudentExamsPage() {
     void loadExams();
   }, [loadExams]);
 
+  useEffect(() => {
+    const state = location.state as { examMessage?: string } | null;
+    if (!state?.examMessage) {
+      return;
+    }
+
+    setExamFeedback(state.examMessage);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
+
   const selectedExam = useMemo(() => exams.find((exam) => exam.id === selectedExamId) ?? null, [exams, selectedExamId]);
   const selectedExamStatus = selectedExam ? getExamStatus(selectedExam) : "upcoming";
   const canLaunchExam =
-    selectedExamStatus === "active" && faceCheckStatus === "passed" && deviceCheckStatus === "passed" && !isStartingExam;
+    selectedExamStatus === "active" &&
+    faceCheckStatus === "passed" &&
+    deviceCheckStatus === "passed" &&
+    hasAcceptedRules &&
+    !isStartingExam;
 
   const startExamFlow = (exam: ExamRecord) => {
     if (getExamStatus(exam) !== "active") {
@@ -116,6 +134,7 @@ export default function StudentExamsPage() {
     setSelectedExamId(exam.id);
     setFaceCheckStatus("idle");
     setDeviceCheckStatus("idle");
+    setHasAcceptedRules(false);
     setLaunchMessage(null);
   };
 
@@ -170,7 +189,7 @@ export default function StudentExamsPage() {
       setLaunchMessage(
         `Exam launch authorized for ${selectedExam.title}. Session started at ${new Date(attempt.startedAt).toLocaleTimeString()}.`,
       );
-      await loadExams();
+      navigate(`/dashboard/student/exams/${selectedExam.id}/session`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start this exam.";
       setLaunchMessage(message);
@@ -275,7 +294,7 @@ export default function StudentExamsPage() {
                       disabled={!canStart}
                       onClick={() => startExamFlow(exam)}
                     >
-                      {getExamActionLabel(examStatus)}
+                      {getExamActionLabel(examStatus, exam.attemptStatus)}
                     </Button>
                   </Grid>
                 );
@@ -297,10 +316,43 @@ export default function StudentExamsPage() {
             Pre-start checks for {selectedExam.title}
           </Heading>
           <Text color="gray.600" fontSize="sm" mb={4}>
-            Before exam launch, complete face verification and a live device check.
+            Review rules, complete identity/device checks, then launch into a locked proctored session.
           </Text>
 
           <VStack align="stretch" gap={3}>
+            <Box rounded="lg" border="1px solid" borderColor="blue.200" bg="white" p={3}>
+              <Text fontSize="sm" color="gray.800" fontWeight="semibold" mb={2}>
+                Exam Rules and Proctoring Notice
+              </Text>
+              <VStack align="stretch" gap={1}>
+                <Text fontSize="sm" color="gray.700">
+                  • Fullscreen mode is required throughout the exam.
+                </Text>
+                <Text fontSize="sm" color="gray.700">
+                  • Camera and microphone remain active; suspicious activity is reported to your lecturer.
+                </Text>
+                <Text fontSize="sm" color="gray.700">
+                  • Tab switching, copy/paste shortcuts, and restricted actions are monitored.
+                </Text>
+                <Text fontSize="sm" color="gray.700">
+                  • The exam auto-submits immediately when time elapses.
+                </Text>
+              </VStack>
+              <Flex justify="space-between" align="center" mt={3} gap={3} flexWrap="wrap">
+                <Text fontSize="sm" color="gray.700">
+                  I understand and accept these rules.
+                </Text>
+                <Button
+                  size="sm"
+                  variant={hasAcceptedRules ? "solid" : "outline"}
+                  colorPalette={hasAcceptedRules ? "green" : "blue"}
+                  onClick={() => setHasAcceptedRules((current) => !current)}
+                >
+                  {hasAcceptedRules ? "Rules Acknowledged" : "Acknowledge Rules"}
+                </Button>
+              </Flex>
+            </Box>
+
             <Flex align="center" justify="space-between" gap={3} flexWrap="wrap">
               <Text fontSize="sm" color="gray.700">
                 1. Face verification
@@ -335,7 +387,7 @@ export default function StudentExamsPage() {
 
             <Flex justify="space-between" align="center" pt={2} borderTopWidth="1px" borderColor="blue.100" gap={3} flexWrap="wrap">
               <Text fontSize="sm" color="gray.700">
-                Exam start authorization
+                3. Exam start authorization
               </Text>
               <Button colorPalette="blue" disabled={!canLaunchExam} onClick={() => void handleLaunchExam()} loading={isStartingExam}>
                 Launch Exam
