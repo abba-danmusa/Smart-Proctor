@@ -2,6 +2,7 @@ import { Badge, Box, Grid, Heading, Progress, Text, VStack } from "@chakra-ui/re
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { fetchLecturerProctoringEvents, type ProctoringEventRecord } from "../../lib/examApi";
+import { calculateIntegrityScore, getProctoringBreakdownLabel, getProctoringPenalty } from "../../lib/proctoring";
 import type { LecturerLayoutOutletContext } from "./LecturerDashboardLayout";
 import {
   flaggedStudentMetrics,
@@ -11,45 +12,8 @@ import {
   type SuspiciousBreakdownMetric,
 } from "./lecturerDashboardData";
 
-function severityPenalty(severity: ProctoringEventRecord["severity"]) {
-  if (severity === "high") return 12;
-  if (severity === "medium") return 6;
-  return 2;
-}
-
-function getBreakdownLabel(eventType: string) {
-  if (eventType.includes("tab_switch") || eventType.includes("window_blur") || eventType.includes("fullscreen")) {
-    return "Focus / tab violations";
-  }
-
-  if (eventType.includes("speech") || eventType.includes("noise") || eventType.includes("microphone")) {
-    return "Sound anomalies";
-  }
-
-  if (eventType.includes("face_not_detected")) {
-    return "Face not detected";
-  }
-
-  if (eventType.includes("multiple_faces")) {
-    return "Multiple face detection";
-  }
-
-  if (eventType.includes("shortcut") || eventType.includes("clipboard") || eventType.includes("context_menu")) {
-    return "Restricted action attempts";
-  }
-
-  if (eventType.includes("network_offline")) {
-    return "Connectivity anomalies";
-  }
-
-  return eventType
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function buildFlaggedStudents(events: ProctoringEventRecord[]) {
-  const byStudent = new Map<string, { id: string; studentName: string; flagCount: number; penalty: number; eventCount: number }>();
+  const byStudent = new Map<string, { id: string; studentName: string; flagCount: number; events: ProctoringEventRecord[] }>();
 
   for (const event of events) {
     const key = event.studentId;
@@ -57,12 +21,10 @@ function buildFlaggedStudents(events: ProctoringEventRecord[]) {
       id: `metric-${event.studentId}`,
       studentName: event.studentFullName ?? event.studentEmail,
       flagCount: 0,
-      penalty: 0,
-      eventCount: 0,
+      events: [],
     };
 
-    current.eventCount += 1;
-    current.penalty += severityPenalty(event.severity);
+    current.events.push(event);
 
     if (event.severity === "high" || event.severity === "medium") {
       current.flagCount += 1;
@@ -76,24 +38,30 @@ function buildFlaggedStudents(events: ProctoringEventRecord[]) {
       id: item.id,
       studentName: item.studentName,
       flagCount: item.flagCount,
-      averageIntegrityScore: Math.max(0, 100 - Math.round(item.penalty / Math.max(1, item.eventCount))),
+      averageIntegrityScore: calculateIntegrityScore(item.events),
+      violationScore: item.events.reduce((total, event) => total + getProctoringPenalty(event.eventType, event.severity), 0),
     }))
     .sort((first, second) => {
-      if (first.flagCount !== second.flagCount) {
-        return second.flagCount - first.flagCount;
+      if (first.violationScore !== second.violationScore) {
+        return second.violationScore - first.violationScore;
       }
-      return second.averageIntegrityScore - first.averageIntegrityScore;
+      return second.flagCount - first.flagCount;
     })
     .slice(0, 8);
 
-  return metrics satisfies FlaggedStudentMetric[];
+  return metrics.map((metric) => ({
+    id: metric.id,
+    studentName: metric.studentName,
+    flagCount: metric.flagCount,
+    averageIntegrityScore: metric.averageIntegrityScore,
+  })) satisfies FlaggedStudentMetric[];
 }
 
 function buildSuspiciousBreakdown(events: ProctoringEventRecord[]) {
   const counts = new Map<string, number>();
 
   for (const event of events) {
-    const label = getBreakdownLabel(event.eventType);
+    const label = getProctoringBreakdownLabel(event.eventType);
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }
 
@@ -114,8 +82,7 @@ function computeAverageIntegrity(events: ProctoringEventRecord[]) {
     return lecturerAverageIntegrityScore;
   }
 
-  const totalPenalty = events.reduce((total, event) => total + severityPenalty(event.severity), 0);
-  return Math.max(0, Math.round(100 - totalPenalty / events.length));
+  return calculateIntegrityScore(events);
 }
 
 export default function LecturerReportsPage() {

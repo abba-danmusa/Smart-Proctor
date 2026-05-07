@@ -32,7 +32,13 @@ router.post('/api/users/signin', [
     }
     const userJwt = jsonwebtoken_1.default.sign({
         id: user.id,
-        email: user.email
+        email: user.email,
+        role: user.role,
+        fullName: user.fullName,
+        institution: user.institution,
+        department: user.department,
+        studentId: user.studentId,
+        staffId: user.staffId,
     }, process.env.JWT_SECRET);
     req.session = {
         jwt: userJwt

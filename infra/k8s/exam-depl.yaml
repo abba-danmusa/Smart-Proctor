@@ -28,6 +28,8 @@ spec:
                 secretKeyRef:
                   name: exam-mongo-secret
                   key: MONGO_URI
+            - name: MONGO_DB_NAME
+              value: 'exam'
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

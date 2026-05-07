@@ -2,6 +2,14 @@ import { Badge, Box, Button, Flex, Grid, Heading, Portal, Text, VStack } from "@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { fetchLecturerProctoringEvents, type ProctoringEventRecord } from "../../lib/examApi";
+import {
+  calculateIntegrityScore,
+  calculateViolationScore,
+  getProctoringBreakdownLabel,
+  getProctoringEventLabel,
+  getReviewColor,
+  getReviewRecommendation,
+} from "../../lib/proctoring";
 import type { LecturerLayoutOutletContext } from "./LecturerDashboardLayout";
 import {
   liveMonitoringRecords,
@@ -53,13 +61,6 @@ function formatIntegrityColor(score: number) {
   if (score >= 90) return "green";
   if (score >= 75) return "orange";
   return "red";
-}
-
-function formatEventLabel(eventType: string) {
-  return eventType
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function formatEventTimeLabel(isoDate: string) {
@@ -131,9 +132,24 @@ function buildMonitoringRecords(events: ProctoringEventRecord[]) {
 
     const highCount = eventsByRecency.filter((event) => event.severity === "high").length;
     const mediumCount = eventsByRecency.filter((event) => event.severity === "medium").length;
-    const lowCount = eventsByRecency.filter((event) => event.severity === "low").length;
     const suspiciousEventsCount = highCount + mediumCount;
-    const integrityScore = Math.max(0, 100 - highCount * 12 - mediumCount * 6 - lowCount * 2);
+    const violationScore = calculateViolationScore(eventsByRecency);
+    const integrityScore = calculateIntegrityScore(eventsByRecency);
+    const breakdownCounts = new Map<string, number>();
+
+    for (const event of eventsByRecency) {
+      const label = getProctoringBreakdownLabel(event.eventType);
+      breakdownCounts.set(label, (breakdownCounts.get(label) ?? 0) + 1);
+    }
+
+    const violationBreakdown = [...breakdownCounts.entries()]
+      .map(([label, count], index) => ({
+        id: `breakdown-${group.examId}-${group.studentId}-${index}`,
+        label,
+        count,
+      }))
+      .sort((first, second) => second.count - first.count)
+      .slice(0, 6);
 
     return {
       id: `live-${group.examId}-${group.studentId}`,
@@ -142,7 +158,9 @@ function buildMonitoringRecords(events: ProctoringEventRecord[]) {
       cameraStatus: inferCameraStatus(eventsByRecency),
       faceStatus: inferFaceStatus(eventsByRecency),
       suspiciousEventsCount,
+      violationScore,
       integrityScore,
+      reviewRecommendation: getReviewRecommendation(violationScore),
       screenshots: eventsByRecency
         .filter((event) => {
           const evidence = event.evidence ?? {};
@@ -154,26 +172,34 @@ function buildMonitoringRecords(events: ProctoringEventRecord[]) {
           id: `shot-${event.id}`,
           capturedAt: formatEventTimeLabel(event.detectedAt),
           reason: event.message,
+          imageUrl: String((event.evidence ?? {})["frameDataUrl"]),
+          severity: toEventSeverity(event.severity),
         })),
       activityLogs: eventsByRecency.slice(0, 18).map((event) => ({
         id: `log-${event.id}`,
         timestamp: formatEventTimeLabel(event.detectedAt),
-        event: `${formatEventLabel(event.eventType)} - ${event.message}`,
+        category: getProctoringBreakdownLabel(event.eventType),
+        event: `${getProctoringEventLabel(event.eventType)} - ${event.message}`,
         severity: toEventSeverity(event.severity),
       })),
+      violationBreakdown,
       latestDetectedAt: eventsByRecency[0]?.detectedAt ?? "",
     };
   });
 
   groupedRecords.sort((first, second) => {
-    if (first.suspiciousEventsCount !== second.suspiciousEventsCount) {
-      return second.suspiciousEventsCount - first.suspiciousEventsCount;
+    if (first.violationScore !== second.violationScore) {
+      return second.violationScore - first.violationScore;
     }
 
     return new Date(second.latestDetectedAt).getTime() - new Date(first.latestDetectedAt).getTime();
   });
 
-  return groupedRecords.map(({ latestDetectedAt: _latestDetectedAt, ...record }) => record satisfies LiveMonitoringRecord);
+  return groupedRecords.map((record) => {
+    const { latestDetectedAt: _latestDetectedAt, ...rest } = record;
+    void _latestDetectedAt;
+    return rest satisfies LiveMonitoringRecord;
+  });
 }
 
 export default function LecturerLiveMonitoringPage() {
@@ -315,6 +341,7 @@ export default function LecturerLiveMonitoringPage() {
               </Badge>
               <Text color={record.suspiciousEventsCount > 0 ? "orange.700" : "gray.700"} fontWeight="semibold">
                 {record.suspiciousEventsCount}
+                {typeof record.violationScore === "number" ? ` • V${record.violationScore}` : ""}
               </Text>
               <Badge colorPalette={formatIntegrityColor(record.integrityScore)} w="fit-content">
                 {record.integrityScore}%
@@ -357,6 +384,57 @@ export default function LecturerLiveMonitoringPage() {
                 </Button>
               </Flex>
 
+              <Grid templateColumns={{ base: "1fr", md: "repeat(4, minmax(0, 1fr))" }} gap={3} mb={4}>
+                <Box rounded="xl" border="1px solid" borderColor="gray.200" bg="gray.50" p={3}>
+                  <Text fontSize="xs" fontWeight="bold" letterSpacing="0.08em" textTransform="uppercase" color="gray.500" mb={1}>
+                    Violation Score
+                  </Text>
+                  <Heading size="sm" color="gray.800">
+                    {selectedRecord.violationScore ?? 0}
+                  </Heading>
+                </Box>
+                <Box rounded="xl" border="1px solid" borderColor="gray.200" bg="gray.50" p={3}>
+                  <Text fontSize="xs" fontWeight="bold" letterSpacing="0.08em" textTransform="uppercase" color="gray.500" mb={1}>
+                    Review Status
+                  </Text>
+                  <Badge colorPalette={getReviewColor(selectedRecord.violationScore ?? 0)}>
+                    {selectedRecord.reviewRecommendation ?? getReviewRecommendation(selectedRecord.violationScore ?? 0)}
+                  </Badge>
+                </Box>
+                <Box rounded="xl" border="1px solid" borderColor="gray.200" bg="gray.50" p={3}>
+                  <Text fontSize="xs" fontWeight="bold" letterSpacing="0.08em" textTransform="uppercase" color="gray.500" mb={1}>
+                    Suspicious Events
+                  </Text>
+                  <Heading size="sm" color="gray.800">
+                    {selectedRecord.suspiciousEventsCount}
+                  </Heading>
+                </Box>
+                <Box rounded="xl" border="1px solid" borderColor="gray.200" bg="gray.50" p={3}>
+                  <Text fontSize="xs" fontWeight="bold" letterSpacing="0.08em" textTransform="uppercase" color="gray.500" mb={1}>
+                    Camera / Face
+                  </Text>
+                  <Flex gap={2} flexWrap="wrap">
+                    <Badge colorPalette={getCameraStatusColor(selectedRecord.cameraStatus)}>{getCameraStatusLabel(selectedRecord.cameraStatus)}</Badge>
+                    <Badge colorPalette={getFaceStatusColor(selectedRecord.faceStatus)}>{getFaceStatusLabel(selectedRecord.faceStatus)}</Badge>
+                  </Flex>
+                </Box>
+              </Grid>
+
+              {selectedRecord.violationBreakdown && selectedRecord.violationBreakdown.length > 0 ? (
+                <Box rounded="xl" border="1px solid" borderColor="gray.200" bg="gray.50" p={4} mb={4}>
+                  <Heading size="sm" color="gray.800" mb={3}>
+                    Violation Breakdown
+                  </Heading>
+                  <Flex gap={2} flexWrap="wrap">
+                    {selectedRecord.violationBreakdown.map((item) => (
+                      <Badge key={item.id} colorPalette="teal" px={3} py={1}>
+                        {item.label}: {item.count}
+                      </Badge>
+                    ))}
+                  </Flex>
+                </Box>
+              ) : null}
+
               <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={4}>
                 <Box rounded="xl" border="1px solid" borderColor="gray.200" bg="gray.50" p={4} minH="220px">
                   <Heading size="sm" color="gray.800" mb={3}>
@@ -378,18 +456,39 @@ export default function LecturerLiveMonitoringPage() {
                         p={3}
                         shadow="0 5px 14px rgba(15, 23, 42, 0.06)"
                       >
-                        <Box
-                          rounded="md"
-                          border="1px dashed"
-                          borderColor="gray.300"
-                          bg="linear-gradient(135deg, #f0f9ff 0%, #e8f7f5 100%)"
-                          p={4}
-                          mb={2}
-                        >
+                        {shot.imageUrl ? (
+                          <img
+                            src={shot.imageUrl}
+                            alt={shot.reason}
+                            style={{
+                              width: "100%",
+                              height: "180px",
+                              objectFit: "cover",
+                              borderRadius: "10px",
+                              border: "1px solid #e2e8f0",
+                              marginBottom: "8px",
+                            }}
+                          />
+                        ) : (
+                          <Box
+                            rounded="md"
+                            border="1px dashed"
+                            borderColor="gray.300"
+                            bg="linear-gradient(135deg, #f0f9ff 0%, #e8f7f5 100%)"
+                            p={4}
+                            mb={2}
+                          >
+                            <Text fontSize="xs" color="gray.600">
+                              Captured frame at {shot.capturedAt}
+                            </Text>
+                          </Box>
+                        )}
+                        <Flex justify="space-between" align="center" gap={2} mb={1}>
                           <Text fontSize="xs" color="gray.600">
                             Captured frame at {shot.capturedAt}
                           </Text>
-                        </Box>
+                          {shot.severity ? <Badge colorPalette={getSeverityColor(shot.severity)}>{shot.severity}</Badge> : null}
+                        </Flex>
                         <Text fontSize="sm" color="gray.700">
                           {shot.reason}
                         </Text>
@@ -411,6 +510,11 @@ export default function LecturerLiveMonitoringPage() {
                           </Text>
                           <Badge colorPalette={getSeverityColor(log.severity)}>{log.severity}</Badge>
                         </Flex>
+                        {log.category ? (
+                          <Text fontSize="xs" color="teal.700" mb={1}>
+                            {log.category}
+                          </Text>
+                        ) : null}
                         <Text fontSize="sm" color="gray.600">
                           {log.timestamp}
                         </Text>

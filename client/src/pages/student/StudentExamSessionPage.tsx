@@ -10,31 +10,13 @@ import {
   type ProctoringEventSeverity,
   type StudentExamSessionRecord,
 } from "../../lib/examApi";
-
-interface FaceDetectionResult {
-  boundingBox: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-}
-
-interface FaceDetectorLike {
-  detect: (input: CanvasImageSource) => Promise<FaceDetectionResult[]>;
-}
-
-interface FaceDetectorConstructor {
-  new (options?: { fastMode?: boolean; maxDetectedFaces?: number }): FaceDetectorLike;
-}
-
-interface SmartWindow extends Window {
-  FaceDetector?: FaceDetectorConstructor;
-}
+import { detectFacesWithLandmarks, type FaceApiLandmarksLike, type FaceApiPointLike } from "../../lib/faceApi";
+import { getProctoringEventLabel, getProctoringPenalty } from "../../lib/proctoring";
 
 type CameraState = "online" | "offline" | "blocked";
 type MicrophoneState = "quiet" | "noise" | "speech" | "blocked";
-type FaceState = "checking" | "verified" | "not_detected" | "multiple_faces" | "unsupported";
+type FaceState = "checking" | "verified" | "not_detected" | "multiple_faces" | "unsupported" | "disabled";
+type AttentionState = "checking" | "focused" | "drifting" | "unsupported";
 
 interface MonitoringLogItem {
   id: string;
@@ -43,7 +25,16 @@ interface MonitoringLogItem {
   message: string;
 }
 
+interface ExamDraftState {
+  answers?: Record<string, string>;
+  flaggedQuestions?: number[];
+  currentQuestionNumber?: number | null;
+}
+
 const EXAM_WARNING_MS = [10 * 60 * 1000, 5 * 60 * 1000, 60 * 1000] as const;
+const ATTENTION_DRIFT_STREAK_THRESHOLD = 2;
+const MATERIAL_SUSPICION_STREAK_THRESHOLD = 2;
+const SPEECH_STREAK_THRESHOLD = 2;
 
 function formatRemainingTime(remainingMs: number) {
   const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
@@ -56,12 +47,6 @@ function formatRemainingTime(remainingMs: number) {
   }
 
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function severityPenalty(severity: ProctoringEventSeverity) {
-  if (severity === "high") return 10;
-  if (severity === "medium") return 5;
-  return 2;
 }
 
 function getSeverityColor(severity: ProctoringEventSeverity) {
@@ -85,6 +70,7 @@ function getMicrophoneStateColor(state: MicrophoneState) {
 
 function getFaceStateColor(state: FaceState) {
   if (state === "verified") return "green";
+  if (state === "disabled") return "gray";
   if (state === "unsupported") return "blue";
   if (state === "checking") return "orange";
   return "red";
@@ -94,8 +80,23 @@ function getFaceStateLabel(state: FaceState) {
   if (state === "verified") return "Single face verified";
   if (state === "not_detected") return "Face not detected";
   if (state === "multiple_faces") return "Multiple faces detected";
-  if (state === "unsupported") return "Face detector unavailable";
+  if (state === "disabled") return "Face monitoring disabled";
+  if (state === "unsupported") return "Face monitoring unavailable";
   return "Checking face presence";
+}
+
+function getAttentionStateColor(state: AttentionState) {
+  if (state === "focused") return "green";
+  if (state === "drifting") return "orange";
+  if (state === "unsupported") return "blue";
+  return "gray";
+}
+
+function getAttentionStateLabel(state: AttentionState) {
+  if (state === "focused") return "Focused on screen";
+  if (state === "drifting") return "Possible eye/head drift";
+  if (state === "unsupported") return "Attention monitoring unavailable";
+  return "Checking screen focus";
 }
 
 function toAnswerPayload(answers: Record<string, string>) {
@@ -112,8 +113,74 @@ function createMonitoringLogItem(input: { severity: ProctoringEventSeverity; mes
   } satisfies MonitoringLogItem;
 }
 
+function averagePoint(points: FaceApiPointLike[]) {
+  if (points.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const totals = points.reduce(
+    (current, point) => ({
+      x: current.x + point.x,
+      y: current.y + point.y,
+    }),
+    { x: 0, y: 0 },
+  );
+
+  return {
+    x: totals.x / points.length,
+    y: totals.y / points.length,
+  };
+}
+
+function distanceBetween(first: FaceApiPointLike, second: FaceApiPointLike) {
+  return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function calculateEyeAspectRatio(points: FaceApiPointLike[]) {
+  if (points.length < 6) {
+    return 0;
+  }
+
+  const verticalLeft = distanceBetween(points[1], points[5]);
+  const verticalRight = distanceBetween(points[2], points[4]);
+  const horizontal = distanceBetween(points[0], points[3]);
+
+  if (horizontal <= 0) {
+    return 0;
+  }
+
+  return (verticalLeft + verticalRight) / (2 * horizontal);
+}
+
+function analyzeAttention(landmarks: FaceApiLandmarksLike, frameWidth: number, frameHeight: number) {
+  const leftEyeCenter = averagePoint(landmarks.getLeftEye());
+  const rightEyeCenter = averagePoint(landmarks.getRightEye());
+  const noseCenter = averagePoint(landmarks.getNose());
+  const eyeMidpoint = averagePoint([leftEyeCenter, rightEyeCenter]);
+  const interocularDistance = distanceBetween(leftEyeCenter, rightEyeCenter);
+  const headTurnRatio =
+    interocularDistance > 0 ? Math.abs(noseCenter.x - eyeMidpoint.x) / interocularDistance : 0;
+
+  const faceCenterOffsetX = Math.abs(eyeMidpoint.x / Math.max(frameWidth, 1) - 0.5);
+  const faceCenterOffsetY = Math.abs(noseCenter.y / Math.max(frameHeight, 1) - 0.48);
+  const leftEyeAspectRatio = calculateEyeAspectRatio(landmarks.getLeftEye());
+  const rightEyeAspectRatio = calculateEyeAspectRatio(landmarks.getRightEye());
+  const averageEyeAspectRatio = (leftEyeAspectRatio + rightEyeAspectRatio) / 2;
+
+  const isDrifting =
+    headTurnRatio > 0.22 || faceCenterOffsetX > 0.2 || faceCenterOffsetY > 0.18 || averageEyeAspectRatio < 0.16;
+
+  return {
+    averageEyeAspectRatio,
+    faceCenterOffsetX,
+    faceCenterOffsetY,
+    headTurnRatio,
+    isDrifting,
+  };
+}
+
 export default function StudentExamSessionPage() {
-  const user = getSessionUser();
+  const [user] = useState(() => getSessionUser());
   const { examId } = useParams<{ examId: string }>();
   const navigate = useNavigate();
 
@@ -121,7 +188,7 @@ export default function StudentExamSessionPage() {
   const [isLoadingSession, setIsLoadingSession] = useState(true);
   const [sessionFeedback, setSessionFeedback] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [activeQuestionNumber, setActiveQuestionNumber] = useState<number | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [flaggedQuestions, setFlaggedQuestions] = useState<number[]>([]);
   const [monitoringLogs, setMonitoringLogs] = useState<MonitoringLogItem[]>([]);
@@ -132,6 +199,7 @@ export default function StudentExamSessionPage() {
   const [cameraState, setCameraState] = useState<CameraState>("offline");
   const [microphoneState, setMicrophoneState] = useState<MicrophoneState>("blocked");
   const [faceState, setFaceState] = useState<FaceState>("checking");
+  const [attentionState, setAttentionState] = useState<AttentionState>("checking");
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -145,23 +213,52 @@ export default function StudentExamSessionPage() {
   const isSubmittingRef = useRef(false);
   const warnedThresholdsRef = useRef<Set<number>>(new Set());
   const throttledEventsRef = useRef<Record<string, number>>({});
+  const hasHydratedDraftRef = useRef(false);
+  const speechStreakRef = useRef(0);
+  const attentionDriftStreakRef = useRef(0);
+  const materialSuspicionStreakRef = useRef(0);
 
   const draftStorageKey = useMemo(() => {
-    if (!user || !examId) {
+    if (!user?.id || !examId) {
       return null;
     }
 
     return `smart-proctor.exam-draft.${user.id}.${examId}`;
-  }, [examId, user]);
+  }, [examId, user?.id]);
 
-  const questions = session?.questions ?? [];
-  const currentQuestion = questions[currentQuestionIndex] ?? null;
+  const questions = useMemo(() => session?.questions ?? [], [session]);
+  const currentQuestionIndex = useMemo(() => {
+    if (questions.length === 0) {
+      return -1;
+    }
+
+    if (activeQuestionNumber === null) {
+      return 0;
+    }
+
+    const questionIndex = questions.findIndex((question) => question.questionNumber === activeQuestionNumber);
+    return questionIndex >= 0 ? questionIndex : 0;
+  }, [activeQuestionNumber, questions]);
+  const currentQuestion = currentQuestionIndex >= 0 ? questions[currentQuestionIndex] ?? null : null;
   const answeredQuestionCount = useMemo(
     () => questions.filter((question) => Boolean(answers[String(question.questionNumber)])).length,
     [answers, questions],
   );
 
   const flaggedQuestionSet = useMemo(() => new Set(flaggedQuestions), [flaggedQuestions]);
+
+  useEffect(() => {
+    if (questions.length === 0) {
+      if (activeQuestionNumber !== null) {
+        setActiveQuestionNumber(null);
+      }
+      return;
+    }
+
+    if (activeQuestionNumber === null || !questions.some((question) => question.questionNumber === activeQuestionNumber)) {
+      setActiveQuestionNumber(questions[0].questionNumber);
+    }
+  }, [activeQuestionNumber, questions]);
 
   const resetWarningMessage = useCallback((message: string) => {
     setWarningMessage(message);
@@ -188,6 +285,27 @@ export default function StudentExamSessionPage() {
     return canvas.toDataURL("image/jpeg", 0.55);
   }, []);
 
+  const attachStreamToVideo = useCallback((stream: MediaStream) => {
+    const videoElement = videoRef.current;
+    if (!videoElement) {
+      return;
+    }
+
+    const playVideo = () => {
+      void videoElement.play().catch(() => undefined);
+    };
+
+    videoElement.muted = true;
+    videoElement.srcObject = stream;
+
+    if (videoElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      playVideo();
+      return;
+    }
+
+    videoElement.addEventListener("loadedmetadata", playVideo, { once: true });
+  }, []);
+
   const reportMonitoringEvent = useCallback(
     async (input: ProctoringEventInput) => {
       if (!user || !examId) {
@@ -204,8 +322,12 @@ export default function StudentExamSessionPage() {
       throttledEventsRef.current[throttleKey] = now;
 
       const severity = input.severity ?? "medium";
-      setIntegrityScore((current) => Math.max(0, current - severityPenalty(severity)));
-      setMonitoringLogs((current) => [createMonitoringLogItem({ severity, message: input.message }), ...current].slice(0, 12));
+      const penalty = getProctoringPenalty(input.eventType, severity);
+      setIntegrityScore((current) => Math.max(0, current - penalty));
+      setMonitoringLogs((current) => {
+        const eventLabel = getProctoringEventLabel(input.eventType);
+        return [createMonitoringLogItem({ severity, message: `${eventLabel}: ${input.message}` }), ...current].slice(0, 12);
+      });
       resetWarningMessage(input.message);
 
       try {
@@ -252,6 +374,12 @@ export default function StudentExamSessionPage() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+    }
+
+    const videoElement = videoRef.current;
+    if (videoElement) {
+      videoElement.pause();
+      videoElement.srcObject = null;
     }
   }, []);
 
@@ -332,8 +460,29 @@ export default function StudentExamSessionPage() {
     let disposed = false;
 
     const loadSession = async () => {
+      hasHydratedDraftRef.current = false;
       setIsLoadingSession(true);
       setSessionFeedback(null);
+      setSession(null);
+      setAnswers({});
+      setFlaggedQuestions([]);
+      setActiveQuestionNumber(null);
+      setMonitoringLogs([]);
+      setWarningMessage(null);
+      setIntegrityScore(100);
+      setRemainingTimeMs(0);
+      setKeystrokeCount(0);
+      setCameraState("offline");
+      setMicrophoneState("blocked");
+      setFaceState("checking");
+      setAttentionState("checking");
+      setIsSubmitting(false);
+      isSubmittingRef.current = false;
+      warnedThresholdsRef.current.clear();
+      throttledEventsRef.current = {};
+      speechStreakRef.current = 0;
+      attentionDriftStreakRef.current = 0;
+      materialSuspicionStreakRef.current = 0;
 
       try {
         const fetchedSession = await fetchStudentExamSession(examId, user);
@@ -341,22 +490,41 @@ export default function StudentExamSessionPage() {
           return;
         }
 
-        setSession(fetchedSession);
-        setCurrentQuestionIndex(0);
-        setRemainingTimeMs(Math.max(0, new Date(fetchedSession.exam.endAt).getTime() - Date.now()));
+        let restoredAnswers: Record<string, string> = {};
+        let restoredFlaggedQuestions: number[] = [];
+        let restoredQuestionNumber = fetchedSession.questions[0]?.questionNumber ?? null;
 
         if (draftStorageKey) {
           const rawDraft = window.localStorage.getItem(draftStorageKey);
           if (rawDraft) {
             try {
-              const parsedDraft = JSON.parse(rawDraft) as { answers?: Record<string, string>; flaggedQuestions?: number[] };
-              setAnswers(parsedDraft.answers ?? {});
-              setFlaggedQuestions(Array.isArray(parsedDraft.flaggedQuestions) ? parsedDraft.flaggedQuestions : []);
+              const parsedDraft = JSON.parse(rawDraft) as ExamDraftState;
+              restoredAnswers = parsedDraft.answers ?? {};
+              restoredFlaggedQuestions = Array.isArray(parsedDraft.flaggedQuestions)
+                ? parsedDraft.flaggedQuestions.filter((questionNumber) => typeof questionNumber === "number")
+                : [];
+
+              const draftQuestionNumber =
+                typeof parsedDraft.currentQuestionNumber === "number" ? parsedDraft.currentQuestionNumber : null;
+
+              if (
+                draftQuestionNumber !== null &&
+                fetchedSession.questions.some((question) => question.questionNumber === draftQuestionNumber)
+              ) {
+                restoredQuestionNumber = draftQuestionNumber;
+              }
             } catch {
               // Ignore malformed persisted draft.
             }
           }
         }
+
+        setSession(fetchedSession);
+        setAnswers(restoredAnswers);
+        setFlaggedQuestions(restoredFlaggedQuestions);
+        setActiveQuestionNumber(restoredQuestionNumber);
+        setRemainingTimeMs(Math.max(0, new Date(fetchedSession.exam.endAt).getTime() - Date.now()));
+        hasHydratedDraftRef.current = true;
       } catch (error) {
         if (disposed) {
           return;
@@ -379,18 +547,19 @@ export default function StudentExamSessionPage() {
   }, [draftStorageKey, examId, user]);
 
   useEffect(() => {
-    if (!draftStorageKey) {
+    if (!draftStorageKey || !session || !hasHydratedDraftRef.current) {
       return;
     }
 
     const payload = JSON.stringify({
       answers,
       flaggedQuestions,
+      currentQuestionNumber: currentQuestion?.questionNumber ?? null,
       updatedAt: new Date().toISOString(),
     });
 
     window.localStorage.setItem(draftStorageKey, payload);
-  }, [answers, draftStorageKey, flaggedQuestions]);
+  }, [answers, currentQuestion?.questionNumber, draftStorageKey, flaggedQuestions, session]);
 
   useEffect(() => {
     if (!session) {
@@ -429,6 +598,9 @@ export default function StudentExamSessionPage() {
     }
 
     let disposed = false;
+    const faceMonitoringEnabled = session.exam.proctoring.faceVerification || session.exam.proctoring.multipleFaceDetection;
+    const tabSwitchDetectionEnabled = session.exam.proctoring.tabSwitchDetection;
+    let detachVideoTrackListener: (() => void) | undefined;
 
     const startMonitoring = async () => {
       try {
@@ -448,7 +620,7 @@ export default function StudentExamSessionPage() {
 
         const videoTrack = stream.getVideoTracks()[0];
         if (videoTrack) {
-          videoTrack.addEventListener("ended", () => {
+          const handleVideoTrackEnded = () => {
             setCameraState("offline");
             void reportMonitoringEvent({
               eventType: "camera_offline",
@@ -458,17 +630,21 @@ export default function StudentExamSessionPage() {
                 frameDataUrl: captureVideoFrame(),
               },
             });
-          });
+          };
+
+          videoTrack.addEventListener("ended", handleVideoTrackEnded);
+          detachVideoTrackListener = () => {
+            videoTrack.removeEventListener("ended", handleVideoTrackEnded);
+          };
         }
 
-        const videoElement = videoRef.current;
-        if (videoElement) {
-          videoElement.srcObject = stream;
-          void videoElement.play().catch(() => undefined);
-        }
+        attachStreamToVideo(stream);
 
         const audioContext = new AudioContext();
         audioContextRef.current = audioContext;
+        if (audioContext.state === "suspended") {
+          void audioContext.resume().catch(() => undefined);
+        }
         const sourceNode = audioContext.createMediaStreamSource(stream);
         const analyserNode = audioContext.createAnalyser();
         analyserNode.fftSize = 2048;
@@ -501,20 +677,26 @@ export default function StudentExamSessionPage() {
           const zeroCrossingRate = zeroCrossings / data.length;
 
           if (rms < 0.03) {
+            speechStreakRef.current = 0;
             setMicrophoneState("quiet");
             return;
           }
 
           if (zeroCrossingRate > 0.08 && zeroCrossingRate < 0.22) {
             setMicrophoneState("speech");
+            speechStreakRef.current += 1;
 
             if (session.exam.proctoring.soundDetection) {
               void reportMonitoringEvent({
-                eventType: "speech_detected",
-                severity: "medium",
-                message: "Speech-like audio detected by the microphone.",
+                eventType: speechStreakRef.current >= SPEECH_STREAK_THRESHOLD ? "prolonged_speech_detected" : "speech_detected",
+                severity: speechStreakRef.current >= SPEECH_STREAK_THRESHOLD ? "high" : "medium",
+                message:
+                  speechStreakRef.current >= SPEECH_STREAK_THRESHOLD
+                    ? "Repeated speech was detected near the student."
+                    : "Speech-like audio detected by the microphone.",
                 evidence: {
                   rms,
+                  speechStreak: speechStreakRef.current,
                   zeroCrossingRate,
                 },
               });
@@ -523,6 +705,7 @@ export default function StudentExamSessionPage() {
             return;
           }
 
+          speechStreakRef.current = 0;
           setMicrophoneState("noise");
           if (session.exam.proctoring.soundDetection && rms >= 0.1) {
             void reportMonitoringEvent({
@@ -537,67 +720,107 @@ export default function StudentExamSessionPage() {
           }
         }, 2500);
 
-        const faceDetectorCtor = (window as SmartWindow).FaceDetector;
-        if (!faceDetectorCtor || !session.exam.proctoring.multipleFaceDetection) {
-          setFaceState("unsupported");
-          return;
-        }
+        if (!faceMonitoringEnabled) {
+          setFaceState("disabled");
+          setAttentionState("unsupported");
+        } else {
+          setFaceState("checking");
+          setAttentionState("checking");
 
-        const detector = new faceDetectorCtor({ fastMode: true, maxDetectedFaces: 4 });
-        setFaceState("checking");
+          faceMonitorTimerRef.current = window.setInterval(() => {
+            const video = videoRef.current;
+            if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
+              return;
+            }
 
-        faceMonitorTimerRef.current = window.setInterval(() => {
-          const video = videoRef.current;
-          if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
-            return;
-          }
+            const canvas = document.createElement("canvas");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext("2d");
+            if (!context) {
+              return;
+            }
 
-          const canvas = document.createElement("canvas");
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          const context = canvas.getContext("2d");
-          if (!context) {
-            return;
-          }
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            void detectFacesWithLandmarks(canvas)
+              .then((faces) => {
+                if (faces.length === 0) {
+                  attentionDriftStreakRef.current = 0;
+                  setAttentionState("checking");
 
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          void detector
-            .detect(canvas)
-            .then((faces) => {
-              if (faces.length === 1) {
+                  if (!session.exam.proctoring.faceVerification) {
+                    setFaceState("checking");
+                    return;
+                  }
+
+                  setFaceState("not_detected");
+                  void reportMonitoringEvent({
+                    eventType: "face_not_detected",
+                    severity: "high",
+                    message: "No face detected in camera frame.",
+                    evidence: {
+                      frameDataUrl: canvas.toDataURL("image/jpeg", 0.55),
+                      faceCount: faces.length,
+                    },
+                  });
+                  return;
+                }
+
+                if (faces.length > 1 && session.exam.proctoring.multipleFaceDetection) {
+                  setFaceState("multiple_faces");
+                  setAttentionState("drifting");
+                  void reportMonitoringEvent({
+                    eventType: "multiple_faces_detected",
+                    severity: "high",
+                    message: "Multiple faces detected in camera frame.",
+                    evidence: {
+                      frameDataUrl: canvas.toDataURL("image/jpeg", 0.55),
+                      faceCount: faces.length,
+                    },
+                  });
+                  return;
+                }
+
+                const primaryFace = faces[0];
+                const attention = analyzeAttention(primaryFace.landmarks, canvas.width, canvas.height);
+
                 setFaceState("verified");
-                return;
-              }
+                if (attention.isDrifting) {
+                  attentionDriftStreakRef.current += 1;
+                  setAttentionState("drifting");
 
-              if (faces.length === 0) {
-                setFaceState("not_detected");
-                void reportMonitoringEvent({
-                  eventType: "face_not_detected",
-                  severity: "high",
-                  message: "No face detected in camera frame.",
-                  evidence: {
-                    frameDataUrl: canvas.toDataURL("image/jpeg", 0.55),
-                    faceCount: faces.length,
-                  },
-                });
-                return;
-              }
+                  if (attentionDriftStreakRef.current >= ATTENTION_DRIFT_STREAK_THRESHOLD) {
+                    void reportMonitoringEvent({
+                      eventType: "attention_drift_detected",
+                      severity: "medium",
+                      message: "Eyes or head appear repeatedly turned away from the exam screen.",
+                      evidence: {
+                        eyeAspectRatio: attention.averageEyeAspectRatio,
+                        faceCenterOffsetX: attention.faceCenterOffsetX,
+                        faceCenterOffsetY: attention.faceCenterOffsetY,
+                        frameDataUrl: canvas.toDataURL("image/jpeg", 0.55),
+                        headTurnRatio: attention.headTurnRatio,
+                      },
+                    });
+                  }
 
-              setFaceState("multiple_faces");
-              void reportMonitoringEvent({
-                eventType: "multiple_faces_detected",
-                severity: "high",
-                message: "Multiple faces detected in camera frame.",
-                evidence: {
-                  frameDataUrl: canvas.toDataURL("image/jpeg", 0.55),
-                  faceCount: faces.length,
-                },
+                  return;
+                }
+
+                attentionDriftStreakRef.current = 0;
+                setAttentionState("focused");
+              })
+              .catch(() => {
+                setFaceState("unsupported");
+                setAttentionState("unsupported");
+
+                if (faceMonitorTimerRef.current !== null) {
+                  window.clearInterval(faceMonitorTimerRef.current);
+                  faceMonitorTimerRef.current = null;
+                }
               });
-            })
-            .catch(() => {
-              setFaceState("unsupported");
-            });
-        }, 6000);
+          }, 6000);
+        }
 
         let previousFrameData: Uint8ClampedArray | null = null;
         motionMonitorTimerRef.current = window.setInterval(() => {
@@ -619,20 +842,57 @@ export default function StudentExamSessionPage() {
 
           if (previousFrameData) {
             let diffSum = 0;
-            let samples = 0;
+            let totalSamples = 0;
+            let changedSamples = 0;
+            let lowerFrameSamples = 0;
+            let lowerFrameChangedSamples = 0;
 
-            for (let index = 0; index < imageData.length; index += 12) {
-              diffSum += Math.abs(imageData[index] - previousFrameData[index]);
-              samples += 1;
+            for (let y = 0; y < canvas.height; y += 3) {
+              for (let x = 0; x < canvas.width; x += 3) {
+                const index = (y * canvas.width + x) * 4;
+                const redDiff = Math.abs(imageData[index] - previousFrameData[index]);
+                const greenDiff = Math.abs(imageData[index + 1] - previousFrameData[index + 1]);
+                const blueDiff = Math.abs(imageData[index + 2] - previousFrameData[index + 2]);
+                const pixelDiff = (redDiff + greenDiff + blueDiff) / 3;
+
+                diffSum += pixelDiff;
+                totalSamples += 1;
+
+                const changed = pixelDiff > 42;
+                if (changed) {
+                  changedSamples += 1;
+                }
+
+                const isLikelyDeskRegion = y >= canvas.height * 0.52 && x >= canvas.width * 0.16 && x <= canvas.width * 0.84;
+                if (isLikelyDeskRegion) {
+                  lowerFrameSamples += 1;
+                  if (changed) {
+                    lowerFrameChangedSamples += 1;
+                  }
+                }
+              }
             }
 
-            const averageDiff = samples > 0 ? diffSum / samples : 0;
-            if (averageDiff > 30) {
+            const averageDiff = totalSamples > 0 ? diffSum / totalSamples : 0;
+            const changedPixelRatio = totalSamples > 0 ? changedSamples / totalSamples : 0;
+            const lowerFrameChangeRatio = lowerFrameSamples > 0 ? lowerFrameChangedSamples / lowerFrameSamples : 0;
+            const likelyForeignMaterial =
+              averageDiff > 24 && changedPixelRatio > 0.14 && lowerFrameChangeRatio > 0.24;
+
+            if (likelyForeignMaterial) {
+              materialSuspicionStreakRef.current += 1;
+            } else {
+              materialSuspicionStreakRef.current = 0;
+            }
+
+            if (materialSuspicionStreakRef.current >= MATERIAL_SUSPICION_STREAK_THRESHOLD) {
               void reportMonitoringEvent({
                 eventType: "foreign_material_suspected",
                 severity: "medium",
-                message: "Unusual visual movement suggests possible foreign material in frame.",
+                message: "Possible phone, paper, or other foreign material appeared in the frame.",
                 evidence: {
+                  changedPixelRatio,
+                  deskRegionChangeRatio: lowerFrameChangeRatio,
                   movementScore: averageDiff,
                   frameDataUrl: canvas.toDataURL("image/jpeg", 0.55),
                 },
@@ -640,7 +900,7 @@ export default function StudentExamSessionPage() {
             }
           }
 
-          previousFrameData = imageData;
+          previousFrameData = new Uint8ClampedArray(imageData);
         }, 7000);
       } catch {
         if (disposed) {
@@ -649,7 +909,8 @@ export default function StudentExamSessionPage() {
 
         setCameraState("blocked");
         setMicrophoneState("blocked");
-        setFaceState("unsupported");
+        setFaceState(faceMonitoringEnabled ? "unsupported" : "disabled");
+        setAttentionState("unsupported");
 
         void reportMonitoringEvent({
           eventType: "device_access_blocked",
@@ -663,7 +924,7 @@ export default function StudentExamSessionPage() {
     void attemptFullscreen();
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") {
+      if (tabSwitchDetectionEnabled && document.visibilityState !== "visible") {
         void reportMonitoringEvent({
           eventType: "tab_switch",
           severity: "medium",
@@ -676,11 +937,13 @@ export default function StudentExamSessionPage() {
     };
 
     const handleWindowBlur = () => {
-      void reportMonitoringEvent({
-        eventType: "window_blur",
-        severity: "medium",
-        message: "Exam window lost focus.",
-      });
+      if (tabSwitchDetectionEnabled) {
+        void reportMonitoringEvent({
+          eventType: "window_blur",
+          severity: "medium",
+          message: "Exam window lost focus.",
+        });
+      }
     };
 
     const handleFullscreenChange = () => {
@@ -770,6 +1033,7 @@ export default function StudentExamSessionPage() {
 
     return () => {
       disposed = true;
+      detachVideoTrackListener?.();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleWindowBlur);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
@@ -782,7 +1046,7 @@ export default function StudentExamSessionPage() {
       window.removeEventListener("offline", handleOffline);
       releaseMediaResources();
     };
-  }, [attemptFullscreen, captureVideoFrame, examId, releaseMediaResources, reportMonitoringEvent, session, user]);
+  }, [attachStreamToVideo, attemptFullscreen, captureVideoFrame, examId, releaseMediaResources, reportMonitoringEvent, session, user]);
 
   if (!user) {
     return <Navigate to="/" replace />;
@@ -927,7 +1191,12 @@ export default function StudentExamSessionPage() {
                       variant="outline"
                       colorPalette="blue"
                       disabled={currentQuestionIndex <= 0}
-                      onClick={() => setCurrentQuestionIndex((current) => Math.max(0, current - 1))}
+                      onClick={() => {
+                        const previousQuestion = questions[currentQuestionIndex - 1];
+                        if (previousQuestion) {
+                          setActiveQuestionNumber(previousQuestion.questionNumber);
+                        }
+                      }}
                     >
                       Previous
                     </Button>
@@ -935,7 +1204,12 @@ export default function StudentExamSessionPage() {
                       variant="outline"
                       colorPalette="blue"
                       disabled={currentQuestionIndex >= questions.length - 1}
-                      onClick={() => setCurrentQuestionIndex((current) => Math.min(questions.length - 1, current + 1))}
+                      onClick={() => {
+                        const nextQuestion = questions[currentQuestionIndex + 1];
+                        if (nextQuestion) {
+                          setActiveQuestionNumber(nextQuestion.questionNumber);
+                        }
+                      }}
                     >
                       Next
                     </Button>
@@ -967,9 +1241,9 @@ export default function StudentExamSessionPage() {
                 Question Navigator
               </Heading>
               <Grid templateColumns="repeat(5, minmax(0, 1fr))" gap={2}>
-                {questions.map((question, index) => {
+                {questions.map((question) => {
                   const answered = Boolean(answers[String(question.questionNumber)]);
-                  const current = index === currentQuestionIndex;
+                  const current = question.questionNumber === currentQuestion?.questionNumber;
                   const flagged = flaggedQuestionSet.has(question.questionNumber);
 
                   return (
@@ -978,7 +1252,7 @@ export default function StudentExamSessionPage() {
                       size="sm"
                       variant={current ? "solid" : answered ? "outline" : "ghost"}
                       colorPalette={current ? "blue" : flagged ? "orange" : answered ? "green" : "gray"}
-                      onClick={() => setCurrentQuestionIndex(index)}
+                      onClick={() => setActiveQuestionNumber(question.questionNumber)}
                     >
                       {question.questionNumber}
                     </Button>
@@ -1013,6 +1287,12 @@ export default function StudentExamSessionPage() {
                     Face Status
                   </Text>
                   <Badge colorPalette={getFaceStateColor(faceState)}>{getFaceStateLabel(faceState)}</Badge>
+                </Flex>
+                <Flex justify="space-between" align="center">
+                  <Text fontSize="sm" color="gray.700">
+                    Attention
+                  </Text>
+                  <Badge colorPalette={getAttentionStateColor(attentionState)}>{getAttentionStateLabel(attentionState)}</Badge>
                 </Flex>
                 <Flex justify="space-between" align="center">
                   <Text fontSize="sm" color="gray.700">
