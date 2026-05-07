@@ -13,11 +13,15 @@ const cors_1 = __importDefault(require("cors"));
 const create_exam_1 = require("./routes/create-exam");
 const create_course_1 = require("./routes/create-course");
 const list_courses_1 = require("./routes/list-courses");
+const register_course_1 = require("./routes/register-course");
 const generate_exam_questions_1 = require("./routes/generate-exam-questions");
 const list_exams_1 = require("./routes/list-exams");
 const start_exam_1 = require("./routes/start-exam");
 const submit_exam_1 = require("./routes/submit-exam");
 const expire_exam_1 = require("./routes/expire-exam");
+const get_exam_session_1 = require("./routes/get-exam-session");
+const report_proctoring_event_1 = require("./routes/report-proctoring-event");
+const list_proctoring_events_1 = require("./routes/list-proctoring-events");
 const app = (0, express_1.default)();
 exports.app = app;
 const defaultAllowedOrigins = [
@@ -49,11 +53,15 @@ app.use((0, cookie_session_1.default)({
 app.use(create_exam_1.createExamRouter);
 app.use(create_course_1.createCourseRouter);
 app.use(list_courses_1.listCoursesRouter);
+app.use(register_course_1.registerCourseRouter);
 app.use(generate_exam_questions_1.generateExamQuestionsRouter);
 app.use(list_exams_1.listExamsRouter);
 app.use(start_exam_1.startExamRouter);
 app.use(submit_exam_1.submitExamRouter);
 app.use(expire_exam_1.expireExamRouter);
+app.use(get_exam_session_1.getExamSessionRouter);
+app.use(report_proctoring_event_1.reportProctoringEventRouter);
+app.use(list_proctoring_events_1.listProctoringEventsRouter);
 app.use((_req, _res, _next) => {
     throw new medlink_common_1.NotFoundError();
 });

@@ -31,6 +31,8 @@ export interface LiveMonitoringScreenshot {
   id: string;
   capturedAt: string;
   reason: string;
+  imageUrl?: string;
+  severity?: EventSeverity;
 }
 
 export interface LiveMonitoringActivityLog {
@@ -38,6 +40,13 @@ export interface LiveMonitoringActivityLog {
   timestamp: string;
   event: string;
   severity: EventSeverity;
+  category?: string;
+}
+
+export interface LiveMonitoringViolationMetric {
+  id: string;
+  label: string;
+  count: number;
 }
 
 export interface LiveMonitoringRecord {
@@ -47,9 +56,12 @@ export interface LiveMonitoringRecord {
   cameraStatus: CameraStatus;
   faceStatus: FaceStatus;
   suspiciousEventsCount: number;
+  violationScore?: number;
   integrityScore: number;
+  reviewRecommendation?: string;
   screenshots: LiveMonitoringScreenshot[];
   activityLogs: LiveMonitoringActivityLog[];
+  violationBreakdown?: LiveMonitoringViolationMetric[];
 }
 
 export interface FlaggedStudentMetric {

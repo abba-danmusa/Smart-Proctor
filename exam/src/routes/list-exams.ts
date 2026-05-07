@@ -2,6 +2,8 @@ import express, { Request, Response } from 'express'
 import { Types } from 'mongoose'
 import { BadRequestError, currentUser, requireAuth } from '@danmusa/medlink-common'
 
+import { Course } from '../models/Course'
+import { CourseRegistration } from '../models/CourseRegistration'
 import { Exam } from '../models/Exam'
 import { ExamAttempt, type ExamAttemptDocument } from '../models/ExamAttempt'
 import { getExamLifecycleStatus, getStudentExamStatus } from '../services/exam-status'
@@ -13,6 +15,9 @@ router.get('/api/exams', currentUser, requireAuth, async (req: Request, res: Res
   const requester = getRequesterContext(req)
 
   const query: Record<string, unknown> = {}
+  let registeredCourseIds: Types.ObjectId[] = []
+  let registeredCourseCodes: string[] = []
+  let registeredCourseTitles: string[] = []
 
   if (requester.role === 'lecturer') {
     query['createdBy.id'] = requester.id
@@ -24,6 +29,45 @@ router.get('/api/exams', currentUser, requireAuth, async (req: Request, res: Res
     }
 
     query.institution = requester.institution
+
+    const registrations = await CourseRegistration.find({
+      studentId: requester.id,
+      institution: requester.institution,
+    }).select({ courseId: 1 })
+
+    if (registrations.length === 0) {
+      return res.status(200).send({ exams: [] })
+    }
+
+    registeredCourseIds = registrations.map((registration) => registration.courseId)
+
+    const registeredCourses = await Course.find({
+      _id: { $in: registeredCourseIds },
+      institution: requester.institution,
+    }).select({ code: 1, title: 1 })
+
+    registeredCourseCodes = [...new Set(registeredCourses.map((course) => course.code))]
+    registeredCourseTitles = [...new Set(registeredCourses.map((course) => course.title))]
+
+    const courseScopeFilters: Record<string, unknown>[] = []
+
+    if (registeredCourseIds.length > 0) {
+      courseScopeFilters.push({ courseId: { $in: registeredCourseIds } })
+    }
+
+    if (registeredCourseCodes.length > 0) {
+      courseScopeFilters.push({ courseCode: { $in: registeredCourseCodes } })
+    }
+
+    if (registeredCourseTitles.length > 0) {
+      courseScopeFilters.push({ course: { $in: registeredCourseTitles } })
+    }
+
+    if (courseScopeFilters.length === 0) {
+      return res.status(200).send({ exams: [] })
+    }
+
+    query.$or = courseScopeFilters
   }
 
   const exams = await Exam.find(query).sort({ startAt: 1 })
@@ -64,6 +108,7 @@ router.get('/api/exams', currentUser, requireAuth, async (req: Request, res: Res
         id: exam.id,
         title: exam.title,
         course: exam.course,
+        courseId: exam.courseId?.toString(),
         courseCode: exam.courseCode ?? undefined,
         courseType: exam.courseType ?? undefined,
         durationMinutes: exam.durationMinutes,
@@ -85,6 +130,7 @@ router.get('/api/exams', currentUser, requireAuth, async (req: Request, res: Res
       id: exam.id,
       title: exam.title,
       course: exam.course,
+      courseId: exam.courseId?.toString(),
       courseCode: exam.courseCode ?? undefined,
       courseType: exam.courseType ?? undefined,
       durationMinutes: exam.durationMinutes,

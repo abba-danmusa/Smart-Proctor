@@ -13,6 +13,7 @@ const SIGNOUT_ENDPOINT = (() => {
 
 const studentNavigationItems: Array<{ label: string; to: string; end?: boolean }> = [
   { label: "Dashboard", to: "/dashboard/student", end: true },
+  { label: "Courses", to: "/dashboard/student/courses" },
   { label: "My Exams", to: "/dashboard/student/exams" },
   { label: "Results", to: "/dashboard/student/results" },
   { label: "Profile & Face ID", to: "/dashboard/student/profile" },

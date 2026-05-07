@@ -7,29 +7,65 @@ async function createExam({
   institution,
   startAt,
   endAt,
+  course,
+  courseId,
 }: {
   cookie: string[]
   title: string
   institution: string
   startAt: string
   endAt: string
+  course?: string
+  courseId?: string
 }) {
+  const payload: Record<string, unknown> = {
+    title,
+    durationMinutes: 90,
+    startAt,
+    endAt,
+    institution,
+    proctoring: {
+      faceVerification: true,
+      tabSwitchDetection: true,
+      soundDetection: true,
+      multipleFaceDetection: true,
+    },
+  }
+
+  if (courseId) {
+    payload.courseId = courseId
+  } else {
+    payload.course = course ?? 'Software Engineering'
+  }
+
   return request(app)
     .post('/api/exams')
     .set('Cookie', cookie)
+    .send(payload)
+    .expect(201)
+}
+
+async function createCourse({
+  cookie,
+  institution,
+  code,
+  title,
+  type,
+}: {
+  cookie: string[]
+  institution: string
+  code: string
+  title: string
+  type: 'core' | 'elective'
+}) {
+  return request(app)
+    .post('/api/exams/courses')
+    .set('Cookie', cookie)
     .send({
+      code,
       title,
-      course: 'Software Engineering',
-      durationMinutes: 90,
-      startAt,
-      endAt,
+      type,
       institution,
-      proctoring: {
-        faceVerification: true,
-        tabSwitchDetection: true,
-        soundDetection: true,
-        multipleFaceDetection: true,
-      },
     })
     .expect(201)
 }
@@ -101,10 +137,35 @@ it('returns student institution exams and student statuses', async () => {
     institution: 'Riverside University',
   })
 
+  const liveCourse = await createCourse({
+    cookie: lecturer,
+    institution: 'Riverside University',
+    code: 'CSC-410',
+    title: 'Live Course',
+    type: 'core',
+  })
+
+  const upcomingCourse = await createCourse({
+    cookie: lecturer,
+    institution: 'Riverside University',
+    code: 'CSC-420',
+    title: 'Upcoming Course',
+    type: 'elective',
+  })
+
+  const otherInstitutionCourse = await createCourse({
+    cookie: otherInstitutionLecturer,
+    institution: 'Northbridge University',
+    code: 'MTH-390',
+    title: 'Other Institution Course',
+    type: 'core',
+  })
+
   const liveExam = await createExam({
     cookie: lecturer,
     title: 'Live Exam',
     institution: 'Riverside University',
+    courseId: liveCourse.body.course.id,
     startAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
     endAt: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
   })
@@ -113,6 +174,7 @@ it('returns student institution exams and student statuses', async () => {
     cookie: lecturer,
     title: 'Upcoming Exam',
     institution: 'Riverside University',
+    courseId: upcomingCourse.body.course.id,
     startAt: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
     endAt: new Date(Date.now() + 100 * 60 * 1000).toISOString(),
   })
@@ -121,9 +183,20 @@ it('returns student institution exams and student statuses', async () => {
     cookie: otherInstitutionLecturer,
     title: 'Other Institution Exam',
     institution: 'Northbridge University',
+    courseId: otherInstitutionCourse.body.course.id,
     startAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
     endAt: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
   })
+
+  await request(app)
+    .post(`/api/exams/courses/${liveCourse.body.course.id}/register`)
+    .set('Cookie', student)
+    .expect(201)
+
+  await request(app)
+    .post(`/api/exams/courses/${upcomingCourse.body.course.id}/register`)
+    .set('Cookie', student)
+    .expect(201)
 
   const beforeSubmit = await request(app)
     .get('/api/exams')
@@ -154,4 +227,43 @@ it('returns student institution exams and student statuses', async () => {
 
   const completedExam = afterSubmit.body.exams.find((exam: { title: string }) => exam.title === 'Live Exam')
   expect(completedExam.studentStatus).toEqual('completed')
+})
+
+it('returns no exams for students without registered courses', async () => {
+  const lecturer = await global.signin({
+    role: 'lecturer',
+    fullName: 'Lecturer One',
+    institution: 'Riverside University',
+  })
+
+  const student = await global.signin({
+    id: 'student-without-courses',
+    email: 'student.without.courses@test.com',
+    role: 'student',
+    institution: 'Riverside University',
+  })
+
+  const course = await createCourse({
+    cookie: lecturer,
+    institution: 'Riverside University',
+    code: 'CSC-430',
+    title: 'Computer Networks',
+    type: 'core',
+  })
+
+  await createExam({
+    cookie: lecturer,
+    title: 'Networks Midterm',
+    institution: 'Riverside University',
+    courseId: course.body.course.id,
+    startAt: new Date(Date.now() + 40 * 60 * 1000).toISOString(),
+    endAt: new Date(Date.now() + 100 * 60 * 1000).toISOString(),
+  })
+
+  const response = await request(app)
+    .get('/api/exams')
+    .set('Cookie', student)
+    .expect(200)
+
+  expect(response.body.exams).toHaveLength(0)
 })

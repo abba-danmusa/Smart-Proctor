@@ -204,6 +204,7 @@ router.post('/api/exams', medlink_common_1.currentUser, medlink_common_1.require
     }
     const courseId = asOptionalTrimmedString(req.body.courseId);
     let course = asOptionalTrimmedString(req.body.course);
+    let resolvedCourseId;
     let courseCode = asOptionalTrimmedString(req.body.courseCode)?.toUpperCase();
     let courseType = parseCourseType(req.body.courseType);
     if (courseId) {
@@ -219,6 +220,7 @@ router.post('/api/exams', medlink_common_1.currentUser, medlink_common_1.require
         }
         institution = existingCourse.institution;
         course = existingCourse.title;
+        resolvedCourseId = existingCourse._id;
         courseCode = existingCourse.code;
         courseType = existingCourse.type;
     }
@@ -230,6 +232,7 @@ router.post('/api/exams', medlink_common_1.currentUser, medlink_common_1.require
     const exam = Exam_1.Exam.build({
         title: String(req.body.title).trim(),
         course,
+        courseId: resolvedCourseId,
         courseCode,
         courseType,
         durationMinutes: Number(req.body.durationMinutes),
@@ -258,6 +261,7 @@ router.post('/api/exams', medlink_common_1.currentUser, medlink_common_1.require
             id: exam.id,
             title: exam.title,
             course: exam.course,
+            courseId: exam.courseId?.toString(),
             courseCode: exam.courseCode ?? undefined,
             courseType: exam.courseType ?? undefined,
             durationMinutes: exam.durationMinutes,

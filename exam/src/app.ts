@@ -9,11 +9,15 @@ import cors from 'cors'
 import { createExamRouter } from './routes/create-exam'
 import { createCourseRouter } from './routes/create-course'
 import { listCoursesRouter } from './routes/list-courses'
+import { registerCourseRouter } from './routes/register-course'
 import { generateExamQuestionsRouter } from './routes/generate-exam-questions'
 import { listExamsRouter } from './routes/list-exams'
 import { startExamRouter } from './routes/start-exam'
 import { submitExamRouter } from './routes/submit-exam'
 import { expireExamRouter } from './routes/expire-exam'
+import { getExamSessionRouter } from './routes/get-exam-session'
+import { reportProctoringEventRouter } from './routes/report-proctoring-event'
+import { listProctoringEventsRouter } from './routes/list-proctoring-events'
 
 const app = express()
 const defaultAllowedOrigins = [
@@ -58,11 +62,15 @@ app.use(
 app.use(createExamRouter)
 app.use(createCourseRouter)
 app.use(listCoursesRouter)
+app.use(registerCourseRouter)
 app.use(generateExamQuestionsRouter)
 app.use(listExamsRouter)
 app.use(startExamRouter)
 app.use(submitExamRouter)
 app.use(expireExamRouter)
+app.use(getExamSessionRouter)
+app.use(reportProctoringEventRouter)
+app.use(listProctoringEventsRouter)
 
 app.use((_req, _res, _next) => {
   throw new NotFoundError()

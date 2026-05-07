@@ -108,6 +108,7 @@ it('creates an exam using a courseId and generated questions payload', async () 
     })
         .expect(201);
     expect(response.body.exam.course).toEqual('Advanced Algorithms');
+    expect(response.body.exam.courseId).toEqual(createCourseResponse.body.course.id);
     expect(response.body.exam.courseCode).toEqual('CSC-450');
     expect(response.body.exam.questionCount).toEqual(3);
     expect(response.body.exam.questions).toHaveLength(3);

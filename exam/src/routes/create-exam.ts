@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express'
 import { body } from 'express-validator'
+import { Types } from 'mongoose'
 import {
   BadRequestError,
   NotAuthorizedError,
@@ -267,6 +268,7 @@ router.post(
 
     const courseId = asOptionalTrimmedString(req.body.courseId)
     let course = asOptionalTrimmedString(req.body.course)
+    let resolvedCourseId: Types.ObjectId | undefined
     let courseCode = asOptionalTrimmedString(req.body.courseCode)?.toUpperCase()
     let courseType = parseCourseType(req.body.courseType)
 
@@ -287,6 +289,7 @@ router.post(
 
       institution = existingCourse.institution
       course = existingCourse.title
+      resolvedCourseId = existingCourse._id as Types.ObjectId
       courseCode = existingCourse.code
       courseType = existingCourse.type
     }
@@ -301,6 +304,7 @@ router.post(
     const exam = Exam.build({
       title: String(req.body.title).trim(),
       course,
+      courseId: resolvedCourseId,
       courseCode,
       courseType,
       durationMinutes: Number(req.body.durationMinutes),
@@ -332,6 +336,7 @@ router.post(
         id: exam.id,
         title: exam.title,
         course: exam.course,
+        courseId: exam.courseId?.toString(),
         courseCode: exam.courseCode ?? undefined,
         courseType: exam.courseType ?? undefined,
         durationMinutes: exam.durationMinutes,

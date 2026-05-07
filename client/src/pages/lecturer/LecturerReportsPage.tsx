@@ -1,12 +1,142 @@
 import { Badge, Box, Grid, Heading, Progress, Text, VStack } from "@chakra-ui/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
+import { fetchLecturerProctoringEvents, type ProctoringEventRecord } from "../../lib/examApi";
+import { calculateIntegrityScore, getProctoringBreakdownLabel, getProctoringPenalty } from "../../lib/proctoring";
+import type { LecturerLayoutOutletContext } from "./LecturerDashboardLayout";
 import {
   flaggedStudentMetrics,
   lecturerAverageIntegrityScore,
   suspiciousBreakdownMetrics,
+  type FlaggedStudentMetric,
+  type SuspiciousBreakdownMetric,
 } from "./lecturerDashboardData";
 
+function buildFlaggedStudents(events: ProctoringEventRecord[]) {
+  const byStudent = new Map<string, { id: string; studentName: string; flagCount: number; events: ProctoringEventRecord[] }>();
+
+  for (const event of events) {
+    const key = event.studentId;
+    const current = byStudent.get(key) ?? {
+      id: `metric-${event.studentId}`,
+      studentName: event.studentFullName ?? event.studentEmail,
+      flagCount: 0,
+      events: [],
+    };
+
+    current.events.push(event);
+
+    if (event.severity === "high" || event.severity === "medium") {
+      current.flagCount += 1;
+    }
+
+    byStudent.set(key, current);
+  }
+
+  const metrics = [...byStudent.values()]
+    .map((item) => ({
+      id: item.id,
+      studentName: item.studentName,
+      flagCount: item.flagCount,
+      averageIntegrityScore: calculateIntegrityScore(item.events),
+      violationScore: item.events.reduce((total, event) => total + getProctoringPenalty(event.eventType, event.severity), 0),
+    }))
+    .sort((first, second) => {
+      if (first.violationScore !== second.violationScore) {
+        return second.violationScore - first.violationScore;
+      }
+      return second.flagCount - first.flagCount;
+    })
+    .slice(0, 8);
+
+  return metrics.map((metric) => ({
+    id: metric.id,
+    studentName: metric.studentName,
+    flagCount: metric.flagCount,
+    averageIntegrityScore: metric.averageIntegrityScore,
+  })) satisfies FlaggedStudentMetric[];
+}
+
+function buildSuspiciousBreakdown(events: ProctoringEventRecord[]) {
+  const counts = new Map<string, number>();
+
+  for (const event of events) {
+    const label = getProctoringBreakdownLabel(event.eventType);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+
+  const metrics = [...counts.entries()]
+    .map(([label, count], index) => ({
+      id: `breakdown-${index}-${label}`,
+      label,
+      count,
+    }))
+    .sort((first, second) => second.count - first.count)
+    .slice(0, 10);
+
+  return metrics satisfies SuspiciousBreakdownMetric[];
+}
+
+function computeAverageIntegrity(events: ProctoringEventRecord[]) {
+  if (events.length === 0) {
+    return lecturerAverageIntegrityScore;
+  }
+
+  return calculateIntegrityScore(events);
+}
+
 export default function LecturerReportsPage() {
-  const totalBreakdownCount = suspiciousBreakdownMetrics.reduce((total, metric) => total + metric.count, 0);
+  const { user } = useOutletContext<LecturerLayoutOutletContext>();
+  const [events, setEvents] = useState<ProctoringEventRecord[]>([]);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [reportsFeedback, setReportsFeedback] = useState<string | null>(null);
+
+  const loadEvents = useCallback(async () => {
+    setIsLoadingEvents(true);
+    setReportsFeedback(null);
+
+    try {
+      const fetchedEvents = await fetchLecturerProctoringEvents(user, { limit: 800 });
+      setEvents(fetchedEvents);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load report analytics right now.";
+      setReportsFeedback(message);
+    } finally {
+      setIsLoadingEvents(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadEvents();
+  }, [loadEvents]);
+
+  const flaggedStudents = useMemo(() => {
+    if (events.length === 0) {
+      return flaggedStudentMetrics;
+    }
+
+    const generated = buildFlaggedStudents(events);
+    return generated.length > 0 ? generated : flaggedStudentMetrics;
+  }, [events]);
+
+  const suspiciousBreakdown = useMemo(() => {
+    if (events.length === 0) {
+      return suspiciousBreakdownMetrics;
+    }
+
+    const generated = buildSuspiciousBreakdown(events);
+    return generated.length > 0 ? generated : suspiciousBreakdownMetrics;
+  }, [events]);
+
+  const averageIntegrityScore = useMemo(() => {
+    if (events.length === 0) {
+      return lecturerAverageIntegrityScore;
+    }
+
+    return computeAverageIntegrity(events);
+  }, [events]);
+
+  const totalBreakdownCount = suspiciousBreakdown.reduce((total, metric) => total + metric.count, 0);
 
   return (
     <VStack align="stretch" gap={6}>
@@ -16,6 +146,22 @@ export default function LecturerReportsPage() {
         </Heading>
         <Text color="gray.600">Analyze risk trends, student integrity distribution, and suspicious behavior patterns.</Text>
       </Box>
+
+      {reportsFeedback ? (
+        <Box rounded="xl" border="1px solid" borderColor="orange.300" bg="orange.50" px={4} py={3}>
+          <Text fontSize="sm" color="orange.800">
+            {reportsFeedback}
+          </Text>
+        </Box>
+      ) : null}
+
+      <Text fontSize="sm" color="gray.600">
+        {isLoadingEvents
+          ? "Loading latest proctoring metrics..."
+          : events.length > 0
+            ? `Using ${events.length} recorded proctoring events from active sessions.`
+            : "No live proctoring events yet. Showing baseline sample analytics."}
+      </Text>
 
       <Grid templateColumns={{ base: "1fr", xl: "1.25fr 1fr" }} gap={4}>
         <Box
@@ -31,7 +177,7 @@ export default function LecturerReportsPage() {
           </Heading>
 
           <VStack align="stretch" gap={3}>
-            {flaggedStudentMetrics.map((student, index) => (
+            {flaggedStudents.map((student, index) => (
               <Grid key={student.id} templateColumns="38px 1.8fr 1fr 1fr" alignItems="center" gap={3}>
                 <Box
                   rounded="full"
@@ -76,9 +222,9 @@ export default function LecturerReportsPage() {
             Average Integrity Score
           </Heading>
           <Text fontSize="2xl" fontWeight="bold" color="teal.700" mb={3}>
-            {lecturerAverageIntegrityScore}%
+            {averageIntegrityScore}%
           </Text>
-          <Progress.Root value={lecturerAverageIntegrityScore} colorPalette="teal" rounded="md" size="md">
+          <Progress.Root value={averageIntegrityScore} colorPalette="teal" rounded="md" size="md">
             <Progress.Track>
               <Progress.Range />
             </Progress.Track>
@@ -101,7 +247,7 @@ export default function LecturerReportsPage() {
           Suspicious Activity Breakdown
         </Heading>
         <VStack align="stretch" gap={4}>
-          {suspiciousBreakdownMetrics.map((metric) => {
+          {suspiciousBreakdown.map((metric) => {
             const ratio = totalBreakdownCount > 0 ? Math.round((metric.count / totalBreakdownCount) * 100) : 0;
 
             return (

@@ -4,10 +4,12 @@ import SignupPage from "../pages/SignupPage.tsx";
 import Dashboard from "../pages/Dashboard.tsx";
 import StudentDashboardLayout from "../pages/student/StudentDashboardLayout";
 import StudentOverviewPage from "../pages/student/StudentOverviewPage";
+import StudentCoursesPage from "../pages/student/StudentCoursesPage";
 import StudentExamsPage from "../pages/student/StudentExamsPage";
 import StudentResultsPage from "../pages/student/StudentResultsPage";
 import StudentProfileFaceIdPage from "../pages/student/StudentProfileFaceIdPage";
 import StudentSettingsPage from "../pages/student/StudentSettingsPage";
+import StudentExamSessionPage from "../pages/student/StudentExamSessionPage";
 import LecturerDashboardLayout from "../pages/lecturer/LecturerDashboardLayout";
 import LecturerOverviewPage from "../pages/lecturer/LecturerOverviewPage";
 import LecturerCreateExamPage from "../pages/lecturer/LecturerCreateExamPage";
@@ -30,6 +32,7 @@ export default function AppRouter() {
         <Route path="/" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/dashboard/student/exams/:examId/session" element={<StudentExamSessionPage />} />
         <Route path="/dashboard/admin" element={<AdminDashboardLayout />}>
           <Route index element={<AdminOverviewPage />} />
           <Route path="users" element={<AdminUsersPage />} />
@@ -40,6 +43,7 @@ export default function AppRouter() {
         </Route>
         <Route path="/dashboard/student" element={<StudentDashboardLayout />}>
           <Route index element={<StudentOverviewPage />} />
+          <Route path="courses" element={<StudentCoursesPage />} />
           <Route path="exams" element={<StudentExamsPage />} />
           <Route path="results" element={<StudentResultsPage />} />
           <Route path="profile" element={<StudentProfileFaceIdPage />} />
