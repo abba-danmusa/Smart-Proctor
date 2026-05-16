@@ -10,6 +10,7 @@ const medlink_common_1 = require("@danmusa/medlink-common");
 const Exam_1 = require("../models/Exam");
 const ExamAttempt_1 = require("../models/ExamAttempt");
 const exam_status_1 = require("../services/exam-status");
+const grading_1 = require("../services/grading");
 const requester_context_1 = require("../services/requester-context");
 const router = express_1.default.Router();
 exports.submitExamRouter = router;
@@ -51,6 +52,7 @@ router.post('/api/exams/:examId/submit', medlink_common_1.currentUser, medlink_c
                 submittedAt: attempt.submittedAt?.toISOString(),
                 submittedLate: attempt.submittedLate,
                 integrityScore: attempt.integrityScore,
+                grading: (0, grading_1.serializeAttemptGrading)(attempt.grading),
             },
         });
     }
@@ -64,6 +66,8 @@ router.post('/api/exams/:examId/submit', medlink_common_1.currentUser, medlink_c
     if (req.body.answers && typeof req.body.answers === 'object' && !Array.isArray(req.body.answers)) {
         attempt.answers = req.body.answers;
     }
+    const automaticGrading = (0, grading_1.buildAutomaticGrading)(exam.questions, attempt.answers, now);
+    attempt.grading = automaticGrading.grading;
     await attempt.save();
     res.status(200).send({
         attempt: {
@@ -74,6 +78,7 @@ router.post('/api/exams/:examId/submit', medlink_common_1.currentUser, medlink_c
             submittedAt: attempt.submittedAt?.toISOString(),
             submittedLate: attempt.submittedLate,
             integrityScore: attempt.integrityScore,
+            grading: (0, grading_1.serializeAttemptGrading)(attempt.grading),
         },
     });
 });

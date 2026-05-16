@@ -1,6 +1,27 @@
 import { Schema, Types, model, Model, HydratedDocument } from 'mongoose'
 
 export type ExamAttemptStatus = 'in_progress' | 'submitted' | 'expired'
+export type ExamAttemptGradingStatus = 'pending' | 'auto_graded' | 'manually_graded'
+export type ExamAttemptGradingMethod = 'automatic' | 'manual'
+
+export interface ExamAttemptGraderInfo {
+  id: string
+  email: string
+  fullName: string
+}
+
+export interface ExamAttemptGrading {
+  status: ExamAttemptGradingStatus
+  method?: ExamAttemptGradingMethod
+  autoScore?: number
+  manualScore?: number
+  finalScore?: number
+  correctAnswers?: number
+  totalQuestions?: number
+  feedback?: string
+  gradedAt?: Date
+  gradedBy?: ExamAttemptGraderInfo
+}
 
 export interface IExamAttempt {
   examId: Types.ObjectId
@@ -13,6 +34,7 @@ export interface IExamAttempt {
   submittedLate?: boolean
   integrityScore?: number
   answers?: Record<string, unknown>
+  grading?: ExamAttemptGrading
 }
 
 export type ExamAttemptAttrs = {
@@ -26,6 +48,7 @@ export type ExamAttemptAttrs = {
   submittedLate?: boolean
   integrityScore?: number
   answers?: Record<string, unknown>
+  grading?: ExamAttemptGrading
 }
 
 export type ExamAttemptDocument = HydratedDocument<IExamAttempt>
@@ -83,6 +106,64 @@ const examAttemptSchema = new Schema<IExamAttempt, Model<IExamAttempt> & ModelSt
     },
     answers: {
       type: Schema.Types.Mixed,
+    },
+    grading: {
+      status: {
+        type: String,
+        enum: ['pending', 'auto_graded', 'manually_graded'],
+        default: 'pending',
+      },
+      method: {
+        type: String,
+        enum: ['automatic', 'manual'],
+      },
+      autoScore: {
+        type: Number,
+        min: 0,
+        max: 100,
+      },
+      manualScore: {
+        type: Number,
+        min: 0,
+        max: 100,
+      },
+      finalScore: {
+        type: Number,
+        min: 0,
+        max: 100,
+      },
+      correctAnswers: {
+        type: Number,
+        min: 0,
+      },
+      totalQuestions: {
+        type: Number,
+        min: 0,
+      },
+      feedback: {
+        type: String,
+        trim: true,
+        maxlength: 1500,
+      },
+      gradedAt: {
+        type: Date,
+      },
+      gradedBy: {
+        id: {
+          type: String,
+          trim: true,
+        },
+        email: {
+          type: String,
+          trim: true,
+          lowercase: true,
+        },
+        fullName: {
+          type: String,
+          trim: true,
+          maxlength: 160,
+        },
+      },
     },
   },
   {

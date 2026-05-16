@@ -18,6 +18,10 @@ import { expireExamRouter } from './routes/expire-exam'
 import { getExamSessionRouter } from './routes/get-exam-session'
 import { reportProctoringEventRouter } from './routes/report-proctoring-event'
 import { listProctoringEventsRouter } from './routes/list-proctoring-events'
+import { listExamSubmissionsRouter } from './routes/list-exam-submissions'
+import { getExamSubmissionRouter } from './routes/get-exam-submission'
+import { gradeExamSubmissionRouter } from './routes/grade-exam-submission'
+import { listStudentResultsRouter } from './routes/list-student-results'
 
 const app = express()
 const defaultAllowedOrigins = [
@@ -71,6 +75,10 @@ app.use(expireExamRouter)
 app.use(getExamSessionRouter)
 app.use(reportProctoringEventRouter)
 app.use(listProctoringEventsRouter)
+app.use(listExamSubmissionsRouter)
+app.use(getExamSubmissionRouter)
+app.use(gradeExamSubmissionRouter)
+app.use(listStudentResultsRouter)
 
 app.use((_req, _res, _next) => {
   throw new NotFoundError()
