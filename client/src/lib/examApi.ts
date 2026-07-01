@@ -3,6 +3,8 @@ import type { SessionUser } from './authSession'
 export type ExamLifecycleStatus = 'scheduled' | 'live' | 'expired'
 export type StudentExamStatus = 'upcoming' | 'active' | 'completed' | 'expired'
 export type ExamAttemptStatus = 'in_progress' | 'submitted' | 'expired'
+export type ExamGradingStatus = 'pending' | 'auto_graded' | 'manually_graded'
+export type ExamGradingMethod = 'automatic' | 'manual'
 export type CourseType = 'core' | 'elective'
 export type QuestionDifficulty = 'easy' | 'medium' | 'hard'
 
@@ -77,6 +79,24 @@ export interface ExamRecord {
   attemptStatus?: ExamAttemptStatus
   attemptCount?: number
   submittedAttemptCount?: number
+  gradedAttemptCount?: number
+}
+
+export interface ExamAttemptGradingRecord {
+  status: ExamGradingStatus
+  method?: ExamGradingMethod
+  autoScore?: number
+  manualScore?: number
+  finalScore?: number
+  correctAnswers?: number
+  totalQuestions?: number
+  feedback?: string
+  gradedAt?: string
+  gradedBy?: {
+    id: string
+    email: string
+    fullName: string
+  }
 }
 
 export interface ExamAttemptRecord {
@@ -87,6 +107,7 @@ export interface ExamAttemptRecord {
   submittedAt?: string
   submittedLate?: boolean
   integrityScore?: number
+  grading?: ExamAttemptGradingRecord
 }
 
 export interface ExamSessionQuestionRecord {
@@ -143,6 +164,60 @@ export interface ProctoringEventRecord {
   message: string
   evidence?: Record<string, unknown>
   detectedAt: string
+}
+
+export interface LecturerExamSubmissionSummaryRecord {
+  attemptId: string
+  studentId: string
+  studentEmail: string
+  studentFullName?: string
+  startedAt: string
+  submittedAt?: string
+  submittedLate?: boolean
+  integrityScore?: number
+  grading?: ExamAttemptGradingRecord
+}
+
+export interface LecturerExamSubmissionQuestionReviewRecord {
+  questionNumber: number
+  prompt: string
+  topic: string
+  difficulty: QuestionDifficulty
+  options: string[]
+  selectedOptionKey?: string
+  selectedOptionText?: string
+  correctOptionKey?: string
+  correctOptionText?: string
+  isCorrect: boolean
+  explanation?: string
+}
+
+export interface LecturerExamSubmissionDetailRecord extends LecturerExamSubmissionSummaryRecord {
+  review: LecturerExamSubmissionQuestionReviewRecord[]
+}
+
+export interface LecturerExamSubmissionsResponse {
+  exam: {
+    id: string
+    title: string
+    course: string
+    courseCode?: string
+    questionCount: number
+  }
+  submissions: LecturerExamSubmissionSummaryRecord[]
+}
+
+export interface StudentResultRecord {
+  attemptId: string
+  examId: string
+  examTitle: string
+  course: string
+  courseCode?: string
+  submittedAt?: string
+  submittedLate?: boolean
+  integrityScore?: number
+  grading?: ExamAttemptGradingRecord
+  resultStatus: 'pending' | 'passed' | 'failed'
 }
 
 export interface CreateCourseInput {
@@ -476,4 +551,81 @@ export async function fetchLecturerProctoringEvents(
 
   const body = (await response.json()) as { events: ProctoringEventRecord[] }
   return body.events
+}
+
+export async function fetchExamSubmissions(examId: string, user: SessionUser) {
+  const response = await fetch(buildExamApiUrl(`${examId}/submissions`), {
+    method: 'GET',
+    credentials: 'include',
+    headers: buildExamApiHeaders(user),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiErrorMessage(response, 'Unable to load exam submissions right now.'))
+  }
+
+  const body = (await response.json()) as LecturerExamSubmissionsResponse
+  return body
+}
+
+export async function fetchExamSubmissionDetail(examId: string, attemptId: string, user: SessionUser) {
+  const response = await fetch(buildExamApiUrl(`${examId}/submissions/${attemptId}`), {
+    method: 'GET',
+    credentials: 'include',
+    headers: buildExamApiHeaders(user),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiErrorMessage(response, 'Unable to load this submission review right now.'))
+  }
+
+  const body = (await response.json()) as {
+    exam: LecturerExamSubmissionsResponse['exam']
+    submission: LecturerExamSubmissionDetailRecord
+  }
+  return body
+}
+
+export async function gradeExamSubmission(
+  examId: string,
+  attemptId: string,
+  user: SessionUser,
+  payload: {
+    score: number
+    feedback?: string
+  }
+) {
+  const response = await fetch(buildExamApiUrl(`${examId}/submissions/${attemptId}/grade`), {
+    method: 'PUT',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildExamApiHeaders(user),
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiErrorMessage(response, 'Unable to save this grade right now.'))
+  }
+
+  const body = (await response.json()) as {
+    submission: LecturerExamSubmissionSummaryRecord
+  }
+  return body.submission
+}
+
+export async function fetchStudentResults(user: SessionUser) {
+  const response = await fetch(buildExamApiUrl('results'), {
+    method: 'GET',
+    credentials: 'include',
+    headers: buildExamApiHeaders(user),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiErrorMessage(response, 'Unable to load student results right now.'))
+  }
+
+  const body = (await response.json()) as { results: StudentResultRecord[] }
+  return body.results
 }

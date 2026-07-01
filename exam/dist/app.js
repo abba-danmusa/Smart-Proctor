@@ -22,6 +22,10 @@ const expire_exam_1 = require("./routes/expire-exam");
 const get_exam_session_1 = require("./routes/get-exam-session");
 const report_proctoring_event_1 = require("./routes/report-proctoring-event");
 const list_proctoring_events_1 = require("./routes/list-proctoring-events");
+const list_exam_submissions_1 = require("./routes/list-exam-submissions");
+const get_exam_submission_1 = require("./routes/get-exam-submission");
+const grade_exam_submission_1 = require("./routes/grade-exam-submission");
+const list_student_results_1 = require("./routes/list-student-results");
 const app = (0, express_1.default)();
 exports.app = app;
 const defaultAllowedOrigins = [
@@ -62,6 +66,10 @@ app.use(expire_exam_1.expireExamRouter);
 app.use(get_exam_session_1.getExamSessionRouter);
 app.use(report_proctoring_event_1.reportProctoringEventRouter);
 app.use(list_proctoring_events_1.listProctoringEventsRouter);
+app.use(list_exam_submissions_1.listExamSubmissionsRouter);
+app.use(get_exam_submission_1.getExamSubmissionRouter);
+app.use(grade_exam_submission_1.gradeExamSubmissionRouter);
+app.use(list_student_results_1.listStudentResultsRouter);
 app.use((_req, _res, _next) => {
     throw new medlink_common_1.NotFoundError();
 });

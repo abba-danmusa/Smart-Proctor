@@ -12,6 +12,7 @@ import {
 import { Exam } from '../models/Exam'
 import { ExamAttempt } from '../models/ExamAttempt'
 import { getExamLifecycleStatus } from '../services/exam-status'
+import { buildAutomaticGrading, serializeAttemptGrading } from '../services/grading'
 import { getRequesterContext } from '../services/requester-context'
 
 const router = express.Router()
@@ -68,6 +69,7 @@ router.post(
           submittedAt: attempt.submittedAt?.toISOString(),
           submittedLate: attempt.submittedLate,
           integrityScore: attempt.integrityScore,
+          grading: serializeAttemptGrading(attempt.grading),
         },
       })
     }
@@ -86,6 +88,9 @@ router.post(
       attempt.answers = req.body.answers as Record<string, unknown>
     }
 
+    const automaticGrading = buildAutomaticGrading(exam.questions, attempt.answers, now)
+    attempt.grading = automaticGrading.grading
+
     await attempt.save()
 
     res.status(200).send({
@@ -97,6 +102,7 @@ router.post(
         submittedAt: attempt.submittedAt?.toISOString(),
         submittedLate: attempt.submittedLate,
         integrityScore: attempt.integrityScore,
+        grading: serializeAttemptGrading(attempt.grading),
       },
     })
   }

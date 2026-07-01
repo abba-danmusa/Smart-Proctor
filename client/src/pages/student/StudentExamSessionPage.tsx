@@ -1058,7 +1058,7 @@ export default function StudentExamSessionPage() {
 
   if (!examId) {
     return <Navigate to="/dashboard/student/exams" replace />;
-  }
+  }  
 
   return (
     <Box minH="100vh" bg="linear-gradient(172deg, #f4f7fb 0%, #eaf2ff 52%, #f5f2ea 100%)" px={{ base: 4, md: 6 }} py={{ base: 4, md: 5 }}>

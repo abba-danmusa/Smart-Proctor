@@ -47,6 +47,64 @@ const examAttemptSchema = new mongoose_1.Schema({
     answers: {
         type: mongoose_1.Schema.Types.Mixed,
     },
+    grading: {
+        status: {
+            type: String,
+            enum: ['pending', 'auto_graded', 'manually_graded'],
+            default: 'pending',
+        },
+        method: {
+            type: String,
+            enum: ['automatic', 'manual'],
+        },
+        autoScore: {
+            type: Number,
+            min: 0,
+            max: 100,
+        },
+        manualScore: {
+            type: Number,
+            min: 0,
+            max: 100,
+        },
+        finalScore: {
+            type: Number,
+            min: 0,
+            max: 100,
+        },
+        correctAnswers: {
+            type: Number,
+            min: 0,
+        },
+        totalQuestions: {
+            type: Number,
+            min: 0,
+        },
+        feedback: {
+            type: String,
+            trim: true,
+            maxlength: 1500,
+        },
+        gradedAt: {
+            type: Date,
+        },
+        gradedBy: {
+            id: {
+                type: String,
+                trim: true,
+            },
+            email: {
+                type: String,
+                trim: true,
+                lowercase: true,
+            },
+            fullName: {
+                type: String,
+                trim: true,
+                maxlength: 160,
+            },
+        },
+    },
 }, {
     timestamps: true,
     toJSON: {

@@ -75,6 +75,7 @@ router.get('/api/exams', currentUser, requireAuth, async (req: Request, res: Res
 
   const attemptCountByExam = new Map<string, number>()
   const submittedCountByExam = new Map<string, number>()
+  const gradedCountByExam = new Map<string, number>()
   const studentAttemptByExam = new Map<string, ExamAttemptDocument>()
 
   if (examObjectIds.length > 0) {
@@ -86,6 +87,10 @@ router.get('/api/exams', currentUser, requireAuth, async (req: Request, res: Res
 
       if (attempt.status === 'submitted') {
         submittedCountByExam.set(examId, (submittedCountByExam.get(examId) ?? 0) + 1)
+
+        if (attempt.grading && attempt.grading.status !== 'pending') {
+          gradedCountByExam.set(examId, (gradedCountByExam.get(examId) ?? 0) + 1)
+        }
       }
 
       if (requester.role === 'student' && attempt.studentId === requester.id) {
@@ -100,6 +105,7 @@ router.get('/api/exams', currentUser, requireAuth, async (req: Request, res: Res
     const lifecycleStatus = getExamLifecycleStatus(exam, now)
     const attemptCount = attemptCountByExam.get(exam.id) ?? 0
     const submittedAttemptCount = submittedCountByExam.get(exam.id) ?? 0
+    const gradedAttemptCount = gradedCountByExam.get(exam.id) ?? 0
 
     if (requester.role === 'student') {
       const studentAttempt = studentAttemptByExam.get(exam.id)
@@ -142,6 +148,7 @@ router.get('/api/exams', currentUser, requireAuth, async (req: Request, res: Res
       status: lifecycleStatus,
       attemptCount,
       submittedAttemptCount,
+      gradedAttemptCount,
       proctoring: exam.proctoring,
       createdBy: exam.createdBy,
     }

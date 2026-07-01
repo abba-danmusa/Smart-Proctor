@@ -61,6 +61,7 @@ router.get('/api/exams', medlink_common_1.currentUser, medlink_common_1.requireA
     const examObjectIds = exams.map((exam) => exam._id);
     const attemptCountByExam = new Map();
     const submittedCountByExam = new Map();
+    const gradedCountByExam = new Map();
     const studentAttemptByExam = new Map();
     if (examObjectIds.length > 0) {
         const attempts = await ExamAttempt_1.ExamAttempt.find({ examId: { $in: examObjectIds } });
@@ -69,6 +70,9 @@ router.get('/api/exams', medlink_common_1.currentUser, medlink_common_1.requireA
             attemptCountByExam.set(examId, (attemptCountByExam.get(examId) ?? 0) + 1);
             if (attempt.status === 'submitted') {
                 submittedCountByExam.set(examId, (submittedCountByExam.get(examId) ?? 0) + 1);
+                if (attempt.grading && attempt.grading.status !== 'pending') {
+                    gradedCountByExam.set(examId, (gradedCountByExam.get(examId) ?? 0) + 1);
+                }
             }
             if (requester.role === 'student' && attempt.studentId === requester.id) {
                 studentAttemptByExam.set(examId, attempt);
@@ -80,6 +84,7 @@ router.get('/api/exams', medlink_common_1.currentUser, medlink_common_1.requireA
         const lifecycleStatus = (0, exam_status_1.getExamLifecycleStatus)(exam, now);
         const attemptCount = attemptCountByExam.get(exam.id) ?? 0;
         const submittedAttemptCount = submittedCountByExam.get(exam.id) ?? 0;
+        const gradedAttemptCount = gradedCountByExam.get(exam.id) ?? 0;
         if (requester.role === 'student') {
             const studentAttempt = studentAttemptByExam.get(exam.id);
             return {
@@ -119,6 +124,7 @@ router.get('/api/exams', medlink_common_1.currentUser, medlink_common_1.requireA
             status: lifecycleStatus,
             attemptCount,
             submittedAttemptCount,
+            gradedAttemptCount,
             proctoring: exam.proctoring,
             createdBy: exam.createdBy,
         };
