@@ -10,7 +10,7 @@ export async function findExamForLecturerAccess(examId: string, requester: Reque
   if (!Types.ObjectId.isValid(normalizedExamId)) {
     throw new BadRequestError('examId must be a valid id')
   }
-
+  
   const exam = await Exam.findById(normalizedExamId)
 
   if (!exam) {
